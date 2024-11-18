@@ -1,0 +1,1431 @@
+---
+title: "CAMCAN"
+output: html_document
+---
+
+Read in data from tables and organize it to explore in regressions 
+See how it relates to age
+
+```{r cleaning data and demographics}
+library(ggplot2)
+library(dplyr)
+library(BayesFactor)
+
+# set colour palette
+cbbPalette= c("#DBF132", "#15A705",'#4F89E0',"#D81B99","#268236", '#4d3d87','#593d80', '#3b49e3')
+
+demo=read.csv('~/Documents/CAMCAN_outputs/demographics_4_Guilia.csv')
+
+# read in psd data
+psd_train=read.csv('~/Documents/CAMCAN_outputs/CAMCAN_destriuex_fingerprintPCA/Destriuex_PSD_justrest.csv', header = FALSE)
+psd_vaild=read.csv('~/Documents/CAMCAN_outputs/CAMCAN_destriuex_fingerprintPCA/Destriuex_PSD_justrest2.csv', header = FALSE)
+
+# index to reorder desterieux atlas bc brainstorm has chnaged the order in 2024
+index_dest= read.csv('~/Documents/CAMCAN_outputs/INDEX_Desteriuex.csv', header = FALSE)
+
+# reorder CamCAN matrix
+list=index_dest$V1
+roi_index= c(mapply(seq, 300*(list-1)+1, (300*(list-1)+300)))
+
+psd_train= psd_train[,roi_index]
+psd_vaild= psd_vaild[,roi_index]
+
+corr_psd=cor(t(psd_train),t(psd_vaild)) 
+demo$psd_self_corr=diag(corr_psd)
+demo$psd_identifiability=diag(apply(corr_psd, 2, scale))
+
+
+
+```
+
+
+
+```{r fingerprinting broadband PSD and self similarity}
+
+
+corr_psd=cor(t(psd_train),t(psd_vaild)) 
+demo$psd_self_corr=diag(corr_psd)
+demo$psd_identifiability=diag(apply(corr_psd, 2, scale))
+
+print("psd fingerprinting:")
+tt=apply(corr_psd, 1, which.max)
+sum(seq(1:606)==tt)/606
+tt=apply(corr_psd, 2, which.max)
+sum(seq(1:606)==tt)/606
+
+
+# NOT RELATED TO SELF CORRELATIONS
+lm0=lm(age ~ 1, demo)
+lm1=lm(age ~ DescTools::FisherZ(psd_self_corr), demo)
+summary(lm1)
+sjPlot::tab_model(lm1)
+
+bf = regressionBF(age ~ psd_self_corr, demo, whichModels = "top")
+summary(bf)
+
+ggplot(demo, aes(psd_self_corr, color= Group, fill=group, alpha=0.5)) +
+  geom_density(aes( color= Group, fill=Group), alpha= 0.5) +
+  ggpubr::theme_classic2() +
+  labs(x = "self correlation", y = "denstity")  + xlim(c(0.8,1)) +
+  ggtitle("") + scale_fill_manual(values=cbbPalette[c(2,3,4)]) + scale_color_manual(values=cbbPalette[c(2,3,4)]) 
+
+ggsave('~/Documents/CAMCAN_outputs/Figures_Desterieux/self_corr_per_age_group_hist.pdf', device = "pdf")
+
+ggplot(demo, aes(x= age, y=DescTools::FisherZ(psd_self_corr), color= Group, fill=Group, alpha=0.5)) + geom_point() + 
+  stat_smooth(method = "glm",formula = y ~ poly(x, 1), colour = 'black',fullrange = T, fill = cbbPalette[1]) + 
+  ggpubr::theme_classic2() +
+  labs(x = "age", y = "self-similarity") + scale_fill_manual(values=cbbPalette[c(2,3,4)]) + scale_color_manual(values=cbbPalette[c(2,3,4)]) 
+
+ggsave('~/Documents/CAMCAN_outputs/Figures_Desterieux/self_corr_per_age_scatter.pdf', device = "pdf")
+
+
+# Age related to differentiability / identifiability
+lm0=lm(age ~ 1, demo)
+lm1=lm(age ~ psd_identifiability, demo)
+summary(lm1)
+sjPlot::tab_model(lm1)
+
+bf = regressionBF(age ~ psd_identifiability, demo, whichModels = "top")
+summary(bf)
+
+ggplot(demo, aes(x= age, y=psd_identifiability, color= Group, fill=Group, alpha=0.5)) + geom_point() + 
+  stat_smooth(method = "glm",formula = y ~ poly(x, 1), colour = 'black',fullrange = T, fill = cbbPalette[1]) + 
+  ggpubr::theme_classic2() +
+  labs(x = "age", y = "differentiability") + scale_fill_manual(values=cbbPalette[c(3,4,2)]) + scale_color_manual(values=cbbPalette[c(3,4,2)]) + theme(legend.position = 'none')
+
+ggsave('~/Documents/CAMCAN_outputs/Figures_Desterieux/differentiability_per_age_scatter.pdf', device = "pdf")
+
+
+sickkids_demo= read.csv('~/Documents/SickKids/differentibilitySickKids.csv')
+
+
+data4plot= data.frame(age= c(demo$age, sickkids_demo$Age), differentiability= c(demo$psd_identifiability, sickkids_demo$psd_identifiability))
+
+
+data4plot= data4plot[data4plot$differentiability >0,]
+lm0=lm(age ~ 0, data4plot)
+lm1=lm(age ~ differentiability, data4plot)
+lm2=lm(age ~ sqrt(differentiability), data4plot)
+lm3=lm(age ~ poly(differentiability,2), data4plot)
+
+ggplot(data4plot, aes(x= age, y=differentiability, alpha=0.5)) + geom_point() + 
+  stat_smooth(method = "glm",formula = y ~ poly(x,2), colour = 'black',fullrange = T, fill = cbbPalette[1]) + 
+  ggpubr::theme_classic2() +
+  labs(x = "age", y = "differentiability") + scale_fill_manual(values=cbbPalette[c(3,4,2)]) + scale_color_manual(values=cbbPalette[c(3,4,2)]) + theme(legend.position = 'none')
+
+ggsave('~/Documents/CAMCAN_outputs/Figures_Desterieux/differentiability_per_age_scatter_fullcohort_merged.pdf', device = "pdf")
+```
+
+
+Bootstrap differentiation accuracy  effects 
+
+```{r bootstrap fingerprinting effects}
+
+
+fingerprint_boot=matrix(, ncol = 7,nrow=2000)
+
+temp_boot=matrix(, ncol = 2,nrow=1000)
+
+for(i in 1:1000) {
+  index_random_par=sample(1:606, 485)
+  
+  corr_psd=cor(t(psd_train[index_random_par,]),t(psd_vaild[index_random_par,]))
+  tt=apply(corr_psd, 1, which.max)
+  temp_boot[i,1]=sum(seq(1:485)==tt)/485
+  tt=apply(corr_psd, 2, which.max)
+  temp_boot[i,2]=sum(seq(1:485)==tt)/485
+  
+}
+
+fingerprint_boot[,1]= as.vector(temp_boot)
+write.csv(fingerprint_boot, '~/Documents/CAMCAN_outputs/CamCANDesterieux_outputs/bootstrapped_fingerprinting_fullcohort.csv')
+
+mean(as.vector(temp_boot), na.rm = TRUE)
+sd(as.vector(temp_boot), na.rm = TRUE)
+
+index_delta=unlist(lapply(1:148, function(x) ((x-1)*300)+(1:8)))
+index_theta=unlist(lapply(1:148, function(x) ((x-1)*300)+(9:16))) # theta
+index_alpha=unlist(lapply(1:148, function(x) ((x-1)*300)+(17:26))) # alpha
+index_beta=unlist(lapply(1:148, function(x) ((x-1)*300)+(27:60))) # beta
+index_gamma=unlist(lapply(1:148, function(x) ((x-1)*300)+(61:101))) # gamma
+index_hgamma=unlist(lapply(1:148, function(x) ((x-1)*300)+(102:300))) # Hgamma
+
+index_bands=list(index_delta, index_theta, index_alpha,index_beta,index_gamma,index_hgamma)
+
+
+for (j in 1:6){
+  temp_boot=matrix(, ncol = 2,nrow=1000)
+for(i in 1:1000) {
+  index_freq=index_bands[[j]]
+  index_random_par=sample(1:606, 485)
+  
+  corr_psd=cor(t(psd_train[index_random_par,index_freq]),t(psd_vaild[index_random_par,index_freq])) 
+  tt=apply(corr_psd, 1, which.max)
+  temp_boot[i,1]=sum(seq(1:485)==tt)/485
+  tt=apply(corr_psd, 2, which.max)
+  temp_boot[i,2]=sum(seq(1:485)==tt)/485
+  
+}
+  fingerprint_boot[,j+1]= as.vector(temp_boot)
+  write.csv(fingerprint_boot, '~/Documents/CAMCAN_outputs/CamCANDesterieux_outputs/bootstrapped_fingerprinting_fullcohort.csv')
+  
+
+print(mean(as.vector(temp_boot), na.rm = TRUE))
+print(sd(as.vector(temp_boot), na.rm = TRUE))
+}
+
+
+# now subset per age group
+ind=demo$age>18 & demo$age <45
+psd_t_age= psd_train[ind,]
+psd_v_age= psd_vaild[ind,]
+
+fingerprint_boot=matrix(, ncol = 7,nrow=2000)
+
+temp_boot=matrix(, ncol = 2,nrow=1000)
+
+for(i in 1:1000) {
+  index_random_par=sample(1:sum(ind), 175)
+  
+  corr_psd=cor(t(psd_t_age[index_random_par,]),t(psd_v_age[index_random_par,])) 
+  tt=apply(corr_psd, 1, which.max)
+  temp_boot[i,1]=sum(seq(1:175)==tt)/175
+  tt=apply(corr_psd, 2, which.max)
+  temp_boot[i,2]=sum(seq(1:175)==tt)/175
+  
+}
+
+fingerprint_boot[,1]= as.vector(temp_boot)
+write.csv(fingerprint_boot, '~/Documents/CAMCAN_outputs/CamCANDesterieux_outputs//bootstrapped_fingerprinting_young.csv')
+
+mean(as.vector(temp_boot), na.rm = TRUE)
+sd(as.vector(temp_boot), na.rm = TRUE)
+
+
+for (j in 1:6){
+  temp_boot=matrix(, ncol = 2,nrow=1000)
+for(i in 1:1000) {
+  index_freq=index_bands[[j]]
+  index_random_par=sample(1:sum(ind), 175)
+  
+  corr_psd=cor(t(psd_t_age[index_random_par,index_freq]),t(psd_v_age[index_random_par,index_freq])) 
+  tt=apply(corr_psd, 1, which.max)
+  temp_boot[i,1]=sum(seq(1:175)==tt)/175
+  tt=apply(corr_psd, 2, which.max)
+  temp_boot[i,2]=sum(seq(1:175)==tt)/175
+  
+}
+  fingerprint_boot[,j+1]= as.vector(temp_boot)
+  write.csv(fingerprint_boot, '~/Documents/CAMCAN_outputs/CamCANDesterieux_outputs/bootstrapped_fingerprinting_young.csv')
+
+print(mean(as.vector(temp_boot), na.rm = TRUE))
+print(sd(as.vector(temp_boot), na.rm = TRUE))
+}
+
+
+ind=demo$age>=45 & demo$age <65
+psd_t_age= psd_train[ind,]
+psd_v_age= psd_vaild[ind,]
+
+fingerprint_boot=matrix(, ncol = 7,nrow=2000)
+
+temp_boot=matrix(, ncol = 2,nrow=1000)
+
+for(i in 1:1000) {
+  index_random_par=sample(1:sum(ind), 175)
+  
+  corr_psd=cor(t(psd_v_age[index_random_par,]),t(psd_t_age[index_random_par,])) 
+  tt=apply(corr_psd, 1, which.max)
+  temp_boot[i,1]=sum(seq(1:175)==tt)/175
+  tt=apply(corr_psd, 2, which.max)
+  temp_boot[i,2]=sum(seq(1:175)==tt)/175
+  
+}
+
+fingerprint_boot[,1]= as.vector(temp_boot)
+write.csv(fingerprint_boot, '~/Documents/CAMCAN_outputs/CamCANDesterieux_outputs/bootstrapped_fingerprinting_adult.csv')
+
+mean(as.vector(temp_boot), na.rm = TRUE)
+sd(as.vector(temp_boot), na.rm = TRUE)
+
+
+for (j in 1:6){
+  temp_boot=matrix(, ncol = 2,nrow=1000)
+for(i in 1:1000) {
+  index_freq=index_bands[[j]]
+  index_random_par=sample(1:sum(ind), 175)
+  
+  corr_psd=cor(t(psd_t_age[index_random_par,index_freq]),t(psd_v_age[index_random_par,index_freq])) 
+  tt=apply(corr_psd, 1, which.max)
+  temp_boot[i,1]=sum(seq(1:175)==tt)/175
+  tt=apply(corr_psd, 2, which.max)
+  temp_boot[i,2]=sum(seq(1:175)==tt)/175
+  
+}
+  fingerprint_boot[,j+1]= as.vector(temp_boot)
+  write.csv(fingerprint_boot, '~/Documents/CAMCAN_outputs/CamCANDesterieux_outputs/bootstrapped_fingerprinting_adult.csv')
+
+print(mean(as.vector(temp_boot), na.rm = TRUE))
+print(sd(as.vector(temp_boot), na.rm = TRUE))
+}
+
+
+
+ind=demo$age>=65 & demo$age <90
+psd_t_age= psd_train[ind,]
+psd_v_age= psd_vaild[ind,]
+
+fingerprint_boot=matrix(, ncol = 7,nrow=2000)
+
+temp_boot=matrix(, ncol = 2,nrow=1000)
+
+for(i in 1:1000) {
+  index_random_par=sample(1:sum(ind), 175)
+  
+  corr_psd=cor(t(psd_t_age[index_random_par,]),t(psd_v_age[index_random_par,])) 
+  tt=apply(corr_psd, 1, which.max)
+  temp_boot[i,1]=sum(seq(1:175)==tt)/175
+  tt=apply(corr_psd, 2, which.max)
+  temp_boot[i,2]=sum(seq(1:175)==tt)/175
+  
+}
+
+fingerprint_boot[,1]= as.vector(temp_boot)
+write.csv(fingerprint_boot, '~/Documents/CAMCAN_outputs/CamCANDesterieux_outputs/bootstrapped_fingerprinting_older.csv')
+
+mean(as.vector(temp_boot), na.rm = TRUE)
+sd(as.vector(temp_boot), na.rm = TRUE)
+
+
+for (j in 1:6){
+  temp_boot=matrix(, ncol = 2,nrow=1000)
+for(i in 1:1000) {
+  index_freq=index_bands[[j]]
+  index_random_par=sample(1:sum(ind), 175)
+  
+  corr_psd=cor(t(psd_t_age[index_random_par,index_freq]),t(psd_v_age[index_random_par,index_freq])) 
+  tt=apply(corr_psd, 1, which.max)
+  temp_boot[i,1]=sum(seq(1:175)==tt)/175
+  tt=apply(corr_psd, 2, which.max)
+  temp_boot[i,2]=sum(seq(1:175)==tt)/175
+  
+}
+  fingerprint_boot[,j+1]= as.vector(temp_boot)
+  write.csv(fingerprint_boot, '~/Documents/CAMCAN_outputs/CamCANDesterieux_outputs/bootstrapped_fingerprinting_older.csv')
+
+print(mean(as.vector(temp_boot), na.rm = TRUE))
+print(sd(as.vector(temp_boot), na.rm = TRUE))
+}
+
+
+
+```
+
+
+
+```{r bootstrap fingerprinting effects APERIODIC CORRECED}
+
+# read in psd data
+aper_train=read.csv('~/Documents/CAMCAN_outputs/CAMCAN_destriuex_fingerprintPCA/Destriuex_corraperioidc_rest1.csv', header = FALSE)
+aper_valid=read.csv('~/Documents/CAMCAN_outputs/CAMCAN_destriuex_fingerprintPCA/Destriuex_corraperiodic_rest2.csv', header = FALSE)
+
+# reorder CamCAN matrix
+list=index_dest$V1
+roi_index= c(mapply(seq, 79*(list-1)+7, (79*(list-1)+79)))
+
+aper_train= aper_train[,roi_index]
+aper_valid= aper_valid[,roi_index]
+
+fingerprint_boot=matrix(, ncol = 7,nrow=2000)
+temp_boot=matrix(, ncol = 2,nrow=1000)
+
+for(i in 1:1000) {
+  index_random_par=sample(1:606, 485)
+  
+  corr_psd=cor(t(aper_train[index_random_par,]),t(aper_valid[index_random_par,])) 
+  tt=apply(corr_psd, 1, which.max)
+  temp_boot[i,1]=sum(seq(1:485)==tt)/485
+  tt=apply(corr_psd, 2, which.max)
+  temp_boot[i,2]=sum(seq(1:485)==tt)/485
+  
+}
+
+fingerprint_boot[,1]= as.vector(temp_boot)
+write.csv(fingerprint_boot, '~/Documents/CAMCAN_outputs/CamCANDesterieux_outputs/bootstrapped_fingerprinting_apCORR.csv')
+
+mean(as.vector(temp_boot), na.rm = TRUE)
+sd(as.vector(temp_boot), na.rm = TRUE)
+
+
+ind=demo$age>18 & demo$age <45
+psd_rest_age= aper_train[ind,]
+psd_task_age= aper_valid[ind,]
+
+temp_boot=matrix(, ncol = 2,nrow=1000)
+
+for(i in 1:1000) {
+  index_random_par=sample(1:sum(ind), 175)
+  
+  corr_psd=cor(t(psd_rest_age[index_random_par,]),t(psd_task_age[index_random_par,])) 
+  tt=apply(corr_psd, 1, which.max)
+  temp_boot[i,1]=sum(seq(1:175)==tt)/175
+  tt=apply(corr_psd, 2, which.max)
+  temp_boot[i,2]=sum(seq(1:175)==tt)/175
+  
+}
+
+fingerprint_boot[,2]= as.vector(temp_boot)
+write.csv(fingerprint_boot, '~/Documents/CAMCAN_outputs/CamCANDesterieux_outputs/bootstrapped_fingerprinting_apCORR.csv')
+
+mean(as.vector(temp_boot), na.rm = TRUE)
+sd(as.vector(temp_boot), na.rm = TRUE)
+
+
+
+ind=demo$age>=45 & demo$age <65
+psd_rest_age= aper_train[ind,]
+psd_task_age= aper_valid[ind,]
+
+
+temp_boot=matrix(, ncol = 2,nrow=1000)
+
+for(i in 1:1000) {
+  index_random_par=sample(1:sum(ind), 175)
+  
+  corr_psd=cor(t(psd_rest_age[index_random_par,]),t(psd_task_age[index_random_par,])) 
+  tt=apply(corr_psd, 1, which.max)
+  temp_boot[i,1]=sum(seq(1:175)==tt)/175
+  tt=apply(corr_psd, 2, which.max)
+  temp_boot[i,2]=sum(seq(1:175)==tt)/175
+  
+}
+
+fingerprint_boot[,3]= as.vector(temp_boot)
+write.csv(fingerprint_boot, '~/Documents/CAMCAN_outputs/CamCANDesterieux_outputs/bootstrapped_fingerprinting_apCORR.csv')
+
+mean(as.vector(temp_boot), na.rm = TRUE)
+sd(as.vector(temp_boot), na.rm = TRUE)
+
+
+ind=demo$age>=65 & demo$age <90
+psd_rest_age= aper_train[ind,]
+psd_task_age= aper_valid[ind,]
+
+temp_boot=matrix(, ncol = 2,nrow=1000)
+
+for(i in 1:1000) {
+  index_random_par=sample(1:sum(ind), 175)
+  
+  corr_psd=cor(t(psd_rest_age[index_random_par,]),t(psd_task_age[index_random_par,])) 
+  tt=apply(corr_psd, 1, which.max)
+  temp_boot[i,1]=sum(seq(1:175)==tt)/175
+  tt=apply(corr_psd, 2, which.max)
+  temp_boot[i,2]=sum(seq(1:175)==tt)/175
+  
+}
+
+fingerprint_boot[,4]= as.vector(temp_boot)
+write.csv(fingerprint_boot, '~/Documents/CAMCAN_outputs/CamCANDesterieux_outputs/bootstrapped_fingerprinting_apCORR.csv')
+
+mean(as.vector(temp_boot), na.rm = TRUE)
+sd(as.vector(temp_boot), na.rm = TRUE)
+
+```
+
+
+
+```{r bootstrap fingerprinting effects APERIODIC}
+
+# read in psd data
+aper_train=read.csv('~/Documents/CAMCAN_outputs/CAMCAN_destriuex_fingerprintPCA/Destriuex_aperioidc_rest1.csv', header = FALSE)
+aper_valid=read.csv('~/Documents/CAMCAN_outputs/CAMCAN_destriuex_fingerprintPCA/Destriuex_aperiodic_rest2.csv', header = FALSE)
+
+# reorder CamCAN matrix
+list=index_dest$V1
+roi_index= c(mapply(seq, 79*(list-1)+1, (79*(list-1)+79)))
+
+aper_train= aper_train[,roi_index]
+aper_valid= aper_valid[,roi_index]
+
+fingerprint_boot=matrix(, ncol = 7,nrow=2000)
+temp_boot=matrix(, ncol = 2,nrow=1000)
+
+for(i in 1:1000) {
+  index_random_par=sample(1:606, 485)
+  
+  corr_psd=cor(t(aper_train[index_random_par,]),t(aper_valid[index_random_par,])) 
+  tt=apply(corr_psd, 1, which.max)
+  temp_boot[i,1]=sum(seq(1:485)==tt)/485
+  tt=apply(corr_psd, 2, which.max)
+  temp_boot[i,2]=sum(seq(1:485)==tt)/485
+  
+}
+
+fingerprint_boot[,1]= as.vector(temp_boot)
+write.csv(fingerprint_boot, '~/Documents/CAMCAN_outputs/CamCANDesterieux_outputs/bootstrapped_fingerprinting_aperiodic.csv')
+
+mean(as.vector(temp_boot), na.rm = TRUE)
+sd(as.vector(temp_boot), na.rm = TRUE)
+
+
+ind=demo$age>18 & demo$age <45
+psd_rest_age= aper_train[ind,]
+psd_task_age= aper_valid[ind,]
+
+temp_boot=matrix(, ncol = 2,nrow=1000)
+
+for(i in 1:1000) {
+  index_random_par=sample(1:sum(ind), 175)
+  
+  corr_psd=cor(t(psd_rest_age[index_random_par,]),t(psd_task_age[index_random_par,])) 
+  tt=apply(corr_psd, 1, which.max)
+  temp_boot[i,1]=sum(seq(1:175)==tt)/175
+  tt=apply(corr_psd, 2, which.max)
+  temp_boot[i,2]=sum(seq(1:175)==tt)/175
+  
+}
+
+fingerprint_boot[,2]= as.vector(temp_boot)
+write.csv(fingerprint_boot, '~/Documents/CAMCAN_outputs/CamCANDesterieux_outputs/bootstrapped_fingerprinting_aperiodic.csv')
+
+mean(as.vector(temp_boot), na.rm = TRUE)
+sd(as.vector(temp_boot), na.rm = TRUE)
+
+
+
+ind=demo$age>=45 & demo$age <65
+psd_rest_age= aper_train[ind,]
+psd_task_age= aper_valid[ind,]
+
+
+temp_boot=matrix(, ncol = 2,nrow=1000)
+
+for(i in 1:1000) {
+  index_random_par=sample(1:sum(ind), 175)
+  
+  corr_psd=cor(t(psd_rest_age[index_random_par,]),t(psd_task_age[index_random_par,])) 
+  tt=apply(corr_psd, 1, which.max)
+  temp_boot[i,1]=sum(seq(1:175)==tt)/175
+  tt=apply(corr_psd, 2, which.max)
+  temp_boot[i,2]=sum(seq(1:175)==tt)/175
+  
+}
+
+fingerprint_boot[,3]= as.vector(temp_boot)
+write.csv(fingerprint_boot, '~/Documents/CAMCAN_outputs/CamCANDesterieux_outputs/bootstrapped_fingerprinting_aperiodic.csv')
+
+mean(as.vector(temp_boot), na.rm = TRUE)
+sd(as.vector(temp_boot), na.rm = TRUE)
+
+
+ind=demo$age>=65 & demo$age <90
+psd_rest_age= aper_train[ind,]
+psd_task_age= aper_valid[ind,]
+
+temp_boot=matrix(, ncol = 2,nrow=1000)
+
+for(i in 1:1000) {
+  index_random_par=sample(1:sum(ind), 175)
+  
+  corr_psd=cor(t(psd_rest_age[index_random_par,]),t(psd_task_age[index_random_par,])) 
+  tt=apply(corr_psd, 1, which.max)
+  temp_boot[i,1]=sum(seq(1:175)==tt)/175
+  tt=apply(corr_psd, 2, which.max)
+  temp_boot[i,2]=sum(seq(1:175)==tt)/175
+  
+}
+
+fingerprint_boot[,4]= as.vector(temp_boot)
+write.csv(fingerprint_boot, '~/Documents/CAMCAN_outputs/CamCANDesterieux_outputs/bootstrapped_fingerprinting_aperiodic.csv')
+
+mean(as.vector(temp_boot), na.rm = TRUE)
+sd(as.vector(temp_boot), na.rm = TRUE)
+
+```
+
+
+
+```{r plot fingerprint age effect }
+
+
+data1=read.csv('~/Documents/CAMCAN_outputs/CamCANDesterieux_outputs/bootstrapped_fingerprinting_fullcohort.csv')
+
+data1=data1[,-1]
+data4plot= data.frame(mean_differen=apply(data1, 2, mean), lower=apply(data1, 2, quantile, probs=c(0.025,0.975))[1,], upper= apply(data1, 2, quantile, probs=c(0.025,0.975))[2,])
+
+data4plot$band= c("full band", "delta", "theta", "alpha", "beta", "gamma", "high gamma")
+data4plot$group= rep('full cohort',7)
+
+data1=read.csv('~/Documents/CAMCAN_outputs/CamCANDesterieux_outputs/bootstrapped_fingerprinting_older.csv')
+
+data1=data1[,-1]
+
+data4plot2= data.frame(mean_differen=apply(data1, 2, mean), lower=apply(data1, 2, quantile, probs=c(0.025,0.975))[1,], upper= apply(data1, 2, quantile, probs=c(0.025,0.975))[2,])
+
+data4plot2$band= c("full band", "delta", "theta", "alpha", "beta", "gamma", "high gamma")
+data4plot2$group= rep('older',7)
+
+data4plot= rbind(data4plot, data4plot2)
+
+
+data1=read.csv('~/Documents/CAMCAN_outputs/CamCANDesterieux_outputs/bootstrapped_fingerprinting_adult.csv')
+
+data1=data1[,-1]
+
+data4plot2= data.frame(mean_differen=apply(data1, 2, mean), lower=apply(data1, 2, quantile, probs=c(0.025,0.975))[1,], upper= apply(data1, 2, quantile, probs=c(0.025,0.975))[2,])
+
+data4plot2$band= c("full band", "delta", "theta", "alpha", "beta", "gamma", "high gamma")
+data4plot2$group= rep('adult',7)
+
+data4plot= rbind(data4plot, data4plot2)
+
+
+data1=read.csv('~/Documents/CAMCAN_outputs/CamCANDesterieux_outputs/bootstrapped_fingerprinting_young.csv')
+
+data1=data1[,-1]
+
+data4plot2= data.frame(mean_differen=apply(data1, 2, mean), lower=apply(data1, 2, quantile, probs=c(0.025,0.975))[1,], upper= apply(data1, 2, quantile, probs=c(0.025,0.975))[2,])
+
+data4plot2$band= c("full band", "delta", "theta", "alpha", "beta", "gamma", "high gamma")
+data4plot2$group= rep('young',7)
+
+data4plot= rbind(data4plot, data4plot2)
+
+data4plot$mean_differen=data4plot$mean_differen*100
+data4plot$upper=data4plot$upper*100
+data4plot$lower=data4plot$lower*100
+
+data4plot$band =factor(data4plot$band, levels = c("full band", "delta", "theta", "alpha", "beta", "gamma", "high gamma") )
+
+data4plot$group =factor(data4plot$group, levels = c("full cohort", "young", "adult", "older") )
+
+# set colour palette
+cbbPalette= c("#DBF132", "#15A705",'#4F89E0',"#D81B99","#268236", '#4d3d87','#593d80', '#3b49e3')
+
+ggplot(data=data4plot, aes(x=band, y=mean_differen, fill=group, width=.5)) +  coord_cartesian(ylim=c(0,100))+geom_bar(stat = "identity", position=position_dodge(width = 0.5)) + geom_errorbar(aes(ymin=lower, ymax=upper), width=.2 ,position=position_dodge(.5))  +ggpubr::theme_classic2() + scale_fill_manual(values=cbbPalette) + labs(y="Accuracy (%)", x="",title="") + theme(text = element_text(size=40), legend.title=element_blank())
+
+ggsave('~/Documents/CAMCAN_outputs/Figures_Desterieux/Fingerprinting_age_bootstrapped_new.pdf', device = "pdf", width=25, height=4.51, dpi=800)
+
+
+data4plot=data4plot[data4plot$band == 'full band', ]
+ggplot(data=data4plot, aes(x=band, y=mean_differen, fill=group, width=.5)) +  coord_cartesian(ylim=c(0,100))+geom_bar(stat = "identity", position=position_dodge(width = 0.5)) + geom_errorbar(aes(ymin=lower, ymax=upper), width=.2 ,position=position_dodge(.5))  +ggpubr::theme_classic2() + scale_fill_manual(values=cbbPalette) + labs(y="Accuracy (%)", x="",title="") + theme(text = element_text(size=40), legend.title=element_blank())
+
+ggsave('~/Documents/CAMCAN_outputs/Figures_Desterieux/Fingerprinting_broadband.pdf', device = "pdf", width=8, height=5, dpi=800)
+
+
+
+```
+
+
+
+
+```{r plot fingerprint aperiodic effect }
+
+cbbPalette= c("#DBF132", "#15A705",'#4F89E0',"#D81B99","#268236", '#4d3d87','#593d80', '#3b49e3')
+
+
+data=read.csv('~/Documents/CAMCAN_outputs/CamCANDesterieux_outputs/bootstrapped_fingerprinting_aperiodic.csv')
+
+data1=data[,2]
+data4plot= data.frame(mean_differen=mean(data1), lower=quantile(data1, probs=c(0.025,0.975))[1], upper= quantile(data1, probs=c(0.025,0.975))[2])
+
+data4plot$band= c("aperiodic")
+data4plot$group= rep('full cohort',1)
+
+data1=data[,3]
+data4plot2= data.frame(mean_differen=mean(data1), lower=quantile(data1, probs=c(0.025,0.975))[1], upper= quantile(data1, probs=c(0.025,0.975))[2])
+
+data4plot2$band= c("aperiodic")
+data4plot2$group= rep('young adult',1)
+
+data4plot= rbind(data4plot, data4plot2)
+
+data1=data[,4]
+data4plot2= data.frame(mean_differen=mean(data1), lower=quantile(data1, probs=c(0.025,0.975))[1], upper= quantile(data1, probs=c(0.025,0.975))[2])
+
+data4plot2$band= c("aperiodic")
+data4plot2$group= rep('adult',1)
+
+data4plot= rbind(data4plot, data4plot2)
+
+data1=data[,5]
+data4plot2= data.frame(mean_differen=mean(data1), lower=quantile(data1, probs=c(0.025,0.975))[1], upper= quantile(data1, probs=c(0.025,0.975))[2])
+
+data4plot2$band= c("aperiodic")
+data4plot2$group= rep('older adult',1)
+
+data4plot= rbind(data4plot, data4plot2) 
+
+data4plot[,c(1,2,3)]= data4plot[,c(1,2,3)]*100
+
+data4plot$band= factor(data4plot$band, levels = c("aperiodic"))
+
+data4plot$group= factor(data4plot$group, levels = c("full cohort", "young adult", "adult", "older adult"))
+
+
+ggplot(data=data4plot, aes(x=band, y=mean_differen, fill=group, width=.5)) +  coord_cartesian(ylim=c(0,100))+geom_bar(stat = "identity", position=position_dodge(width = 0.5)) + geom_errorbar(aes(ymin=lower, ymax=upper), width=.2 ,position=position_dodge(.5))  + ggpubr::theme_classic2() + scale_fill_manual(values=cbbPalette) + labs(y="Accuracy (%)", x="",title="") + theme(text = element_text(size=40), legend.title=element_blank())
+
+ggsave('~/Documents/CAMCAN_outputs/Figures_Desterieux/Aperiodic_Fingerprinting_age_bootstrapped.pdf', device = "pdf", width=8, height=5, dpi=800)
+
+
+
+## # # #  # # # # 3
+
+data=read.csv('~/Documents/CAMCAN_outputs/CamCANDesterieux_outputs/bootstrapped_fingerprinting_apCORR.csv')
+
+data1=data[,2]
+data4plot= data.frame(mean_differen=mean(data1), lower=quantile(data1, probs=c(0.025,0.975))[1], upper= quantile(data1, probs=c(0.025,0.975))[2])
+
+data4plot$band= c("aperiodic")
+data4plot$group= rep('full cohort',1)
+
+data1=data[,3]
+data4plot2= data.frame(mean_differen=mean(data1), lower=quantile(data1, probs=c(0.025,0.975))[1], upper= quantile(data1, probs=c(0.025,0.975))[2])
+
+data4plot2$band= c("aperiodic")
+data4plot2$group= rep('young adult',1)
+
+data4plot= rbind(data4plot, data4plot2)
+
+data1=data[,4]
+data4plot2= data.frame(mean_differen=mean(data1), lower=quantile(data1, probs=c(0.025,0.975))[1], upper= quantile(data1, probs=c(0.025,0.975))[2])
+
+data4plot2$band= c("aperiodic")
+data4plot2$group= rep('adult',1)
+
+data4plot= rbind(data4plot, data4plot2)
+
+data1=data[,5]
+data4plot2= data.frame(mean_differen=mean(data1), lower=quantile(data1, probs=c(0.025,0.975))[1], upper= quantile(data1, probs=c(0.025,0.975))[2])
+
+data4plot2$band= c("aperiodic")
+data4plot2$group= rep('older adult',1)
+
+data4plot= rbind(data4plot, data4plot2) 
+
+data4plot[,c(1,2,3)]= data4plot[,c(1,2,3)]*100
+
+data4plot$band= factor(data4plot$band, levels = c("aperiodic"))
+
+data4plot$group= factor(data4plot$group, levels = c("full cohort", "young adult", "adult", "older adult"))
+
+
+ggplot(data=data4plot, aes(x=band, y=mean_differen, fill=group, width=.5)) +  coord_cartesian(ylim=c(0,100))+geom_bar(stat = "identity", position=position_dodge(width = 0.5)) + geom_errorbar(aes(ymin=lower, ymax=upper), width=.2 ,position=position_dodge(.5))  + ggpubr::theme_classic2() + scale_fill_manual(values=cbbPalette) + labs(y="Accuracy (%)", x="",title="") + theme(text = element_text(size=40), legend.title=element_blank())
+
+ggsave('~/Documents/CAMCAN_outputs/Figures_Desterieux/Aperiodic_Corrected_Fingerprinting_age_bootstrapped.pdf', device = "pdf", width=8, height=5, dpi=800)
+
+
+```
+
+```{r fingerprinting of empty room}
+
+library(ggplot2)
+library(dplyr)
+
+
+cbbPalette= c("#4f89e0", "#f5ec6c",'#156605',"#76D7C4","#268236", '#4d3d87','#593d80', '#3b49e3')
+
+
+demo=read.csv('~/Documents/CAMCAN_outputs/CAMCAN_Analysis/standard_data.csv')
+demo$CCID=paste('sub',demo$CCID, sep = '_')
+ids=read.csv('~/Documents/CAMCAN_outputs/CAMCAN_Analysis/subject_codes.csv')
+index=demo$CCID %in% ids$Ids
+demo=demo[index,]
+
+full_demo=read.csv('~/Documents/CAMCAN_outputs/approved_data.csv')
+full_demo$CCID=paste('sub',full_demo$CCID, sep = '_')
+index=full_demo$CCID %in% ids$Ids
+full_demo=full_demo[index,]
+
+psd_rest=read.csv('~/Documents/CAMCAN_outputs/CAMCAN_destriuex_fingerprintPCA//Destriuex_PSD_justrest.csv', header = FALSE)
+psd_task=read.csv('~/Documents/CAMCAN_outputs/CAMCAN_destriuex_fingerprintPCA/Destriuex_PSD_justrest2.csv', header = FALSE)
+
+emptyroom=read.csv('~/Documents/CAMCAN_outputs/CAMCAN_destriuex_fingerprintPCA/Destriuex_PSD_EMPTY.csv', header = FALSE)
+
+fingerprint=matrix(, ncol = 5,nrow=4)
+
+corr_emptyroom1=cor(t(psd_rest),t(emptyroom)) 
+
+print("emptyroom fingerprinting accuracy:")
+tt=apply(corr_emptyroom1, 1, which.max)
+fingerprint[1,1]=sum(seq(1:606)==tt)/606
+tt=apply(corr_emptyroom1, 2, which.max)
+fingerprint[1,2]=sum(seq(1:606)==tt)/606
+
+
+corr_emptyroom2=cor(t(psd_task),t(emptyroom)) 
+
+print("emptyroom fingerprinting accuracy:")
+tt=apply(corr_emptyroom2, 1, which.max)
+fingerprint[1,3]=sum(seq(1:606)==tt)/606
+tt=apply(corr_emptyroom2, 2, which.max)
+fingerprint[1,4]=sum(seq(1:606)==tt)/606
+
+
+# break up into three (roughly equal) age groups
+# young adults (18-45)
+
+ind=demo$Age>18 & demo$Age <45
+sum(ind==TRUE)
+corr_psd=cor(t(psd_rest[ind,]),t(emptyroom[ind,])) 
+print("psd fingerprinting young adults:")
+tt=apply(corr_psd, 1, which.max)
+fingerprint[2,1]=sum(seq(1:sum(ind==TRUE))==tt)/sum(ind==TRUE)
+tt=apply(corr_psd, 2, which.max)
+fingerprint[2,2]=sum(seq(1:sum(ind==TRUE))==tt)/sum(ind==TRUE)
+
+corr_psd=cor(t(psd_task[ind,]),t(emptyroom[ind,])) 
+print("psd fingerprinting young adults:")
+tt=apply(corr_psd, 1, which.max)
+fingerprint[2,3]=sum(seq(1:sum(ind==TRUE))==tt)/sum(ind==TRUE)
+tt=apply(corr_psd, 2, which.max)
+fingerprint[2,4]=sum(seq(1:sum(ind==TRUE))==tt)/sum(ind==TRUE)
+
+
+# adults (45-65)
+
+ind=demo$Age>=45 & demo$Age <65
+sum(ind==TRUE)
+corr_psd=cor(t(psd_rest[ind,]),t(emptyroom[ind,])) 
+print("psd fingerprinting adults:")
+tt=apply(corr_psd, 1, which.max)
+fingerprint[3,1]=sum(seq(1:sum(ind==TRUE))==tt)/sum(ind==TRUE)
+tt=apply(corr_psd, 2, which.max)
+fingerprint[3,2]=sum(seq(1:sum(ind==TRUE))==tt)/sum(ind==TRUE)
+
+corr_psd=cor(t(psd_task[ind,]),t(emptyroom[ind,])) 
+print("psd fingerprinting adults:")
+tt=apply(corr_psd, 1, which.max)
+fingerprint[3,3]=sum(seq(1:sum(ind==TRUE))==tt)/sum(ind==TRUE)
+tt=apply(corr_psd, 2, which.max)
+fingerprint[3,4]=sum(seq(1:sum(ind==TRUE))==tt)/sum(ind==TRUE)
+
+
+# older adults (45-65)
+ind=demo$Age>=65 & demo$Age <90
+sum(ind==TRUE)
+corr_psd=cor(t(psd_rest[ind,]),t(emptyroom[ind,])) 
+print("psd fingerprinting older adults:")
+tt=apply(corr_psd, 1, which.max)
+fingerprint[4,1]=sum(seq(1:sum(ind==TRUE))==tt)/sum(ind==TRUE)
+tt=apply(corr_psd, 2, which.max)
+fingerprint[4,2]=sum(seq(1:sum(ind==TRUE))==tt)/sum(ind==TRUE)
+
+corr_psd=cor(t(psd_task[ind,]),t(emptyroom[ind,])) 
+print("psd fingerprinting older adults:")
+tt=apply(corr_psd, 1, which.max)
+fingerprint[4,3]=sum(seq(1:sum(ind==TRUE))==tt)/sum(ind==TRUE)
+tt=apply(corr_psd, 2, which.max)
+fingerprint[4,4]=sum(seq(1:sum(ind==TRUE))==tt)/sum(ind==TRUE)
+
+fingerprint=as.data.frame(fingerprint)
+
+fingerprint[,5]=c("full dataset", "younger adults", "adults", "older adults")
+fingerprint[,6]=c("full band", "full band", "full band", "full band")
+
+colnames(fingerprint) = c("acc1", "acc2","acc1", "acc2", "age_group", "band")
+
+data4plot=cbind(stack(fingerprint[,1:4]),fingerprint[,5:6])
+data4plot$values=as.numeric(data4plot$values)*100
+
+data4plot$age_group = ordered(fingerprint$age_group, levels= c("full dataset", "younger adults", "adults", "older adults"))
+
+data4plot$band = ordered(fingerprint$band, levels= c("full band"))
+
+ggplot(data=data4plot, aes(x=band, y=values, fill=age_group, width=.5)) +  coord_cartesian(ylim=c(0,10))+geom_bar(stat = "identity", position=position_dodge(width = 0.5)) +theme_minimal() + scale_fill_manual(values=cbbPalette) + labs(y="Accuracy (%)", x="",title="") + theme(text = element_text(size=40), legend.title=element_blank()) + ggpubr::theme_classic2()
+
+ggsave('~/Documents/CAMCAN_outputs/figures/JUSTREST_Emptyroom_Fingerprinting_desteriuex_new.pdf', device = "pdf", width=7, height=4.51, dpi=800)
+
+ggplot(data=data4plot, aes(x=band, y=values, fill=age_group, width=.5)) +  coord_cartesian(ylim=c(0,100))+geom_bar(stat = "identity", position=position_dodge(width = 0.5)) +theme_minimal() + scale_fill_manual(values=cbbPalette) + labs(y="Accuracy (%)", x="",title="") + theme(text = element_text(size=40), legend.title=element_blank()) + ggpubr::theme_classic2()
+
+ggsave('~/Documents/CAMCAN_outputs/figures/JUSTREST_Emptyroom_Fingerprinting_desteriuex_fullrange.pdf', device = "pdf", width=7, height=4.51, dpi=800)
+
+
+```
+
+
+
+
+```{r artifact effects differentiability}
+
+artifacts_rest= read.csv('~/Documents/CAMCAN_outputs/artifacts_from_rest_CAMCAN.csv')
+
+hlu= rowMeans(artifacts_rest[,1:6])
+hlu1= rowMeans(artifacts_rest[,1:3]) # rotation
+hlu2= rowMeans(artifacts_rest[,4:6]) # translation
+ecg= artifacts_rest$ecg1
+eog= rowMeans(artifacts_rest[11:12])
+
+# Age related to differentiability 
+lm1=lm(psd_identifiability ~ hlu, demo)
+summary(lm1)
+sjPlot::tab_model(lm1)
+
+lm1=lm(psd_identifiability ~ hlu1, demo)
+summary(lm1)
+sjPlot::tab_model(lm1)
+
+lm1=lm(psd_identifiability ~ hlu2, demo)
+summary(lm1)
+sjPlot::tab_model(lm1)
+
+lm1=lm(psd_identifiability ~ ecg, demo)
+summary(lm1)
+sjPlot::tab_model(lm1)
+
+lm1=lm(psd_identifiability ~ eog, demo)
+summary(lm1)
+sjPlot::tab_model(lm1)
+
+cor.test(demo$psd_identifiability, hlu)
+correlationBF(demo$psd_identifiability, hlu)
+
+cor.test(demo$psd_identifiability, ecg)
+correlationBF(demo$psd_identifiability, ecg)
+
+cor.test(demo$psd_identifiability, eog)
+correlationBF(demo$psd_identifiability, eog)
+
+cor.test(demo$age, hlu)
+correlationBF(demo$age, hlu)
+
+cor.test(demo$age, ecg)
+correlationBF(demo$age, ecg)
+
+cor.test(demo$age, eog)
+correlationBF(demo$age, eog)
+
+lm1=lm(age ~ hlu , demo)
+
+ggplot(demo, aes(x=age, y = hlu, fill=cbbPalette[2])) + 
+  geom_jitter(colour = cbbPalette[2]) + 
+  stat_smooth(method = "lm", colour = 'black',fullrange = T, fill = cbbPalette[2]) +
+  labs(title = paste("Adj R2 = ", signif(summary(lm1)$adj.r.squared, 5),
+                     "Intercept =", signif(lm1$coef[[1]],5 ),
+                     " Slope =", signif(lm1$coef[[2]], 5),
+                     " P =", signif(summary(lm1)$coef[2,4], 5) )) + scale_fill_manual(values=cbbPalette)  +
+  ggpubr::theme_classic2() +   xlab("age") + ylab("head motion")+
+  theme(axis.text=element_text(size=12),
+        axis.title=element_text(size=14,face="bold"), legend.position = "none") 
+
+ggsave('~/Documents/CAMCAN_outputs/figures/2024_Regression_ARTIFACTS_age_headmotion.pdf', device = "pdf", width=5, height=5, dpi=800)
+
+
+lm1=lm(psd_identifiability ~ hlu , demo)
+
+ggplot(demo, aes(x=psd_identifiability, y = hlu, fill=cbbPalette[5])) + 
+  geom_jitter(colour = cbbPalette[5]) + 
+  stat_smooth(method = "lm", colour = 'black',fullrange = T, fill = cbbPalette[5]) +
+  labs(title = paste("Adj R2 = ", signif(summary(lm1)$adj.r.squared, 5),
+                     "Intercept =", signif(lm1$coef[[1]],5 ),
+                     " Slope =", signif(lm1$coef[[2]], 5),
+                     " P =", signif(summary(lm1)$coef[2,4], 5) )) + scale_fill_manual(values=cbbPalette)  +
+  ggpubr::theme_classic2()+   xlab("differentiability") + ylab("head motion")+
+  theme(axis.text=element_text(size=12),
+        axis.title=element_text(size=14,face="bold"), legend.position = "none") 
+
+ggsave('~/Documents/CAMCAN_outputs/figures/2024_Regression_ARTIFACTS_differentiability_headmotion.pdf', device = "pdf", width=5, height=5, dpi=800)
+
+
+
+lm1=lm(age ~ log(ecg) , demo)
+
+ggplot(demo, aes(x=age, y = log(ecg), fill=cbbPalette[4])) + 
+  geom_jitter(colour = cbbPalette[4]) + 
+  stat_smooth(method = "lm", colour = 'black',fullrange = T, fill = cbbPalette[4]) +
+  labs(title = paste("Adj R2 = ", signif(summary(lm1)$adj.r.squared, 5),
+                     "Intercept =", signif(lm1$coef[[1]],5 ),
+                     " Slope =", signif(lm1$coef[[2]], 5),
+                     " P =", signif(summary(lm1)$coef[2,4], 5) )) + scale_fill_manual(values=cbbPalette)  +
+  ggpubr::theme_classic2() +   xlab("age") + ylab("log cardiac")+
+  theme(axis.text=element_text(size=12),
+        axis.title=element_text(size=14,face="bold"), legend.position = "none") 
+
+ggsave('~/Documents/CAMCAN_outputs/figures/2024_Regression_ARTIFACTS_age_cardiac.pdf', device = "pdf", width=5, height=5, dpi=800)
+
+
+lm1=lm(psd_identifiability ~ log(ecg) , demo)
+
+ggplot(demo, aes(x=psd_identifiability, y = log(ecg), fill=cbbPalette[4])) + 
+  geom_jitter(colour = cbbPalette[4]) + 
+  stat_smooth(method = "lm", colour = 'black',fullrange = T, fill = cbbPalette[4]) +
+  labs(title = paste("Adj R2 = ", signif(summary(lm1)$adj.r.squared, 5),
+                     "Intercept =", signif(lm1$coef[[1]],5 ),
+                     " Slope =", signif(lm1$coef[[2]], 5),
+                     " P =", signif(summary(lm1)$coef[2,4], 5) )) + scale_fill_manual(values=cbbPalette)  +
+  ggpubr::theme_classic2() +   xlab("differentiability") + ylab("log cardiac")+
+  theme(axis.text=element_text(size=12),
+        axis.title=element_text(size=14,face="bold"), legend.position = "none") 
+
+ggsave('~/Documents/CAMCAN_outputs/figures/2024_Regression_ARTIFACTS_differentibility_cardiac.pdf', device = "pdf", width=5, height=5, dpi=800)
+
+
+lm1=lm(psd_identifiability ~ log(eog) , demo)
+
+ggplot(demo, aes(x=psd_identifiability, y = log(eog), fill=cbbPalette[3])) + 
+  geom_jitter(colour = cbbPalette[3]) + 
+  stat_smooth(method = "lm", colour = 'black',fullrange = T, fill = cbbPalette[3]) +
+  labs(title = paste("Adj R2 = ", signif(summary(lm1)$adj.r.squared, 5),
+                     "Intercept =", signif(lm1$coef[[1]],5 ),
+                     " Slope =", signif(lm1$coef[[2]], 5),
+                     " P =", signif(summary(lm1)$coef[2,4], 5) )) + scale_fill_manual(values=cbbPalette)  +
+  ggpubr::theme_classic2() +   xlab("differentiability") + ylab("log occular")+
+  theme(axis.text=element_text(size=12),
+        axis.title=element_text(size=14,face="bold"), legend.position = "none") 
+
+ggsave('~/Documents/CAMCAN_outputs/figures/2024_Regression_ARTIFACTS_differentibility_occular.pdf', device = "pdf", width=5, height=5, dpi=800)
+
+
+
+lm1=lm(age ~ log(eog) , demo)
+
+ggplot(demo, aes(x=age, y = log(eog), fill=cbbPalette[3])) + 
+  geom_jitter(colour = cbbPalette[3]) + 
+  stat_smooth(method = "lm", colour = 'black',fullrange = T, fill = cbbPalette[3]) +
+  labs(title = paste("Adj R2 = ", signif(summary(lm1)$adj.r.squared, 5),
+                     "Intercept =", signif(lm1$coef[[1]],5 ),
+                     " Slope =", signif(lm1$coef[[2]], 5),
+                     " P =", signif(summary(lm1)$coef[2,4], 5) )) + scale_fill_manual(values=cbbPalette)  +
+  ggpubr::theme_classic2() +   xlab("age") + ylab("log occular")+
+  theme(axis.text=element_text(size=12),
+        axis.title=element_text(size=14,face="bold"), legend.position = "none") 
+
+ggsave('~/Documents/CAMCAN_outputs/figures/2024_Regression_ARTIFACTS_age_occular.pdf', device = "pdf", width=5, height=5, dpi=800)
+
+
+```
+
+
+
+```{r Compute ICC effects }
+
+demo=read.csv('~/Documents/CAMCAN_outputs/demographics_4_Guilia.csv')
+
+# read in psd data
+psd_train=read.csv('~/Documents/CAMCAN_outputs/CAMCAN_destriuex_fingerprintPCA/Destriuex_PSD_justrest.csv', header = FALSE)
+psd_vaild=read.csv('~/Documents/CAMCAN_outputs/CAMCAN_destriuex_fingerprintPCA/Destriuex_PSD_justrest2.csv', header = FALSE)
+
+# index to reorder desterieux atlas bc brainstorm has chnaged the order in 2024
+index_dest= read.csv('~/Documents/CAMCAN_outputs/INDEX_Desteriuex.csv', header = FALSE)
+
+# reorder CamCAN matrix
+list=index_dest$V1
+roi_index= c(mapply(seq, 300*(list-1)+1, (300*(list-1)+300)))
+
+psd_train= psd_train[,roi_index]
+psd_vaild= psd_vaild[,roi_index]
+
+z_target= t(scale(t(psd_train)))
+z_database= t(scale(t(psd_vaild)))
+icc = c()
+
+
+n = 606
+k = 2
+df_b = n-1
+df_w = n*(k-1)
+
+
+for (i_edge in 1:length(psd_train)){
+  x= data.frame(unlist(z_target[,i_edge]),unlist(z_database[,i_edge]) )
+  x_w_mean =  rowMeans(x)
+  x_g_mean = mean(unlist(x))
+  ss_t = sum(((x - x_g_mean)^2))
+  ss_w = sum((x - (x_w_mean))^2)
+  ss_b = ss_t - ss_w
+  ms_b = ss_b / df_b
+  ms_w = ss_w / df_w
+  icc[i_edge] = (ms_b - ms_w) / (ms_b + ((k-1)*ms_w))
+  
+  
+}
+
+icc_mat <- matrix(icc, nrow = 148, byrow = TRUE)
+
+write.csv(icc_mat, '~/Documents/CAMCAN_outputs/CamCANDesterieux_outputs/ICC_fullgroup_analysis.csv')
+
+
+# look at age groups 
+ind=demo$age>18 & demo$age <45
+z_target= t(scale(t(psd_train[ind,])))
+z_database= t(scale(t(psd_vaild[ind,])))
+icc = c()
+
+
+n = sum(ind)
+k = 2
+df_b = n-1
+df_w = n*(k-1)
+
+
+for (i_edge in 1:length(psd_train)){
+  x= data.frame(unlist(z_target[,i_edge]),unlist(z_database[,i_edge]) )
+  x_w_mean =  rowMeans(x)
+  x_g_mean = mean(unlist(x))
+  ss_t = sum(((x - x_g_mean)^2))
+  ss_w = sum((x - (x_w_mean))^2)
+  ss_b = ss_t - ss_w
+  ms_b = ss_b / df_b
+  ms_w = ss_w / df_w
+  icc[i_edge] = (ms_b - ms_w) / (ms_b + ((k-1)*ms_w))
+  
+  
+}
+
+icc_mat_young <- matrix(icc, nrow = 148, byrow = TRUE)
+
+write.csv(icc_mat_young, '~/Documents/CAMCAN_outputs/CamCANDesterieux_outputs/ICC_features_young_adults.csv')
+
+
+# look at age groups 
+ind=demo$age>=45 & demo$age <65
+z_target= t(scale(t(psd_train[ind,])))
+z_database= t(scale(t(psd_vaild[ind,])))
+icc = c()
+
+
+n = sum(ind)
+k = 2
+df_b = n-1
+df_w = n*(k-1)
+
+
+for (i_edge in 1:length(psd_train)){
+  x= data.frame(unlist(z_target[,i_edge]),unlist(z_database[,i_edge]) )
+  x_w_mean =  rowMeans(x)
+  x_g_mean = mean(unlist(x))
+  ss_t = sum(((x - x_g_mean)^2))
+  ss_w = sum((x - (x_w_mean))^2)
+  ss_b = ss_t - ss_w
+  ms_b = ss_b / df_b
+  ms_w = ss_w / df_w
+  icc[i_edge] = (ms_b - ms_w) / (ms_b + ((k-1)*ms_w))
+  
+  
+}
+
+icc_mat_adult <- matrix(icc, nrow = 148, byrow = TRUE)
+
+write.csv(icc_mat_adult, '~/Documents/CAMCAN_outputs/CamCANDesterieux_outputs/ICC_features_adults.csv')
+
+
+# look at age groups 
+ind=demo$age>=65 & demo$age <90
+z_target= t(scale(t(psd_train[ind,])))
+z_database= t(scale(t(psd_vaild[ind,])))
+icc = c()
+
+
+n = sum(ind)
+k = 2
+df_b = n-1
+df_w = n*(k-1)
+
+
+for (i_edge in 1:length(psd_vaild)){
+  x= data.frame(unlist(z_target[,i_edge]),unlist(z_database[,i_edge]) )
+  x_w_mean =  rowMeans(x)
+  x_g_mean = mean(unlist(x))
+  ss_t = sum(((x - x_g_mean)^2))
+  ss_w = sum((x - (x_w_mean))^2)
+  ss_b = ss_t - ss_w
+  ms_b = ss_b / df_b
+  ms_w = ss_w / df_w
+  icc[i_edge] = (ms_b - ms_w) / (ms_b + ((k-1)*ms_w))
+  
+  
+}
+
+icc_mat_older <- matrix(icc, nrow = 148, byrow = TRUE)
+write.csv(icc_mat_older, '~/Documents/CAMCAN_outputs/CamCANDesterieux_outputs/ICC_features_older_adults.csv')
+
+icc_diff= icc_mat_older- icc_mat_young
+
+write.csv(icc_diff, '~/Documents/CAMCAN_outputs/CamCANDesterieux_outputs/ICC_diff_between_young_and_older_analysis.csv')
+
+
+```
+
+
+
+
+```{r Compute ICC Aperiodiccorr effects }
+
+demo=read.csv('~/Documents/CAMCAN_outputs/demographics_4_Guilia.csv')
+
+# read in psd data
+psd_train=read.csv('~/Documents/CAMCAN_outputs/CAMCAN_destriuex_fingerprintPCA/Destriuex_corraperioidc_rest1.csv', header = FALSE)
+psd_vaild=read.csv('~/Documents/CAMCAN_outputs/CAMCAN_destriuex_fingerprintPCA/Destriuex_corraperiodic_rest2.csv', header = FALSE)
+
+# index to reorder desterieux atlas bc brainstorm has chnaged the order in 2024
+index_dest= read.csv('~/Documents/CAMCAN_outputs/INDEX_Desteriuex.csv', header = FALSE)
+
+# reorder CamCAN matrix
+list=index_dest$V1
+roi_index= c(mapply(seq, 79*(list-1)+1, (79*(list-1)+79)))
+
+psd_train= psd_train[,roi_index]
+psd_vaild= psd_vaild[,roi_index]
+
+z_target= t(scale(t(psd_train)))
+z_database= t(scale(t(psd_vaild)))
+icc = c()
+
+
+n = 606
+k = 2
+df_b = n-1
+df_w = n*(k-1)
+
+
+for (i_edge in 1:length(psd_train)){
+  x= data.frame(unlist(z_target[,i_edge]),unlist(z_database[,i_edge]) )
+  x_w_mean =  rowMeans(x)
+  x_g_mean = mean(unlist(x))
+  ss_t = sum(((x - x_g_mean)^2))
+  ss_w = sum((x - (x_w_mean))^2)
+  ss_b = ss_t - ss_w
+  ms_b = ss_b / df_b
+  ms_w = ss_w / df_w
+  icc[i_edge] = (ms_b - ms_w) / (ms_b + ((k-1)*ms_w))
+  
+  
+}
+
+icc_mat <- matrix(icc, nrow = 148, byrow = TRUE)
+
+write.csv(icc_mat, '~/Documents/CAMCAN_outputs/CamCANDesterieux_outputs/ICC_AperiodicCorr_fullgroup_analysis.csv')
+
+
+# look at age groups 
+ind=demo$age>18 & demo$age <45
+z_target= t(scale(t(psd_train[ind,])))
+z_database= t(scale(t(psd_vaild[ind,])))
+icc = c()
+
+
+n = sum(ind)
+k = 2
+df_b = n-1
+df_w = n*(k-1)
+
+
+for (i_edge in 1:length(psd_train)){
+  x= data.frame(unlist(z_target[,i_edge]),unlist(z_database[,i_edge]) )
+  x_w_mean =  rowMeans(x)
+  x_g_mean = mean(unlist(x))
+  ss_t = sum(((x - x_g_mean)^2))
+  ss_w = sum((x - (x_w_mean))^2)
+  ss_b = ss_t - ss_w
+  ms_b = ss_b / df_b
+  ms_w = ss_w / df_w
+  icc[i_edge] = (ms_b - ms_w) / (ms_b + ((k-1)*ms_w))
+  
+  
+}
+
+icc_mat_young <- matrix(icc, nrow = 148, byrow = TRUE)
+
+write.csv(icc_mat_young, '~/Documents/CAMCAN_outputs/CamCANDesterieux_outputs/ICC_AperiodicCorr_features_young_adults.csv')
+
+
+# look at age groups 
+ind=demo$age>=45 & demo$age <65
+z_target= t(scale(t(psd_train[ind,])))
+z_database= t(scale(t(psd_vaild[ind,])))
+icc = c()
+
+
+n = sum(ind)
+k = 2
+df_b = n-1
+df_w = n*(k-1)
+
+
+for (i_edge in 1:length(psd_train)){
+  x= data.frame(unlist(z_target[,i_edge]),unlist(z_database[,i_edge]) )
+  x_w_mean =  rowMeans(x)
+  x_g_mean = mean(unlist(x))
+  ss_t = sum(((x - x_g_mean)^2))
+  ss_w = sum((x - (x_w_mean))^2)
+  ss_b = ss_t - ss_w
+  ms_b = ss_b / df_b
+  ms_w = ss_w / df_w
+  icc[i_edge] = (ms_b - ms_w) / (ms_b + ((k-1)*ms_w))
+  
+  
+}
+
+icc_mat_adult <- matrix(icc, nrow = 148, byrow = TRUE)
+
+write.csv(icc_mat_adult, '~/Documents/CAMCAN_outputs/CamCANDesterieux_outputs/ICC_AperiodicCorr_features_adults.csv')
+
+
+# look at age groups 
+ind=demo$age>=65 & demo$age <90
+z_target= t(scale(t(psd_train[ind,])))
+z_database= t(scale(t(psd_vaild[ind,])))
+icc = c()
+
+
+n = sum(ind)
+k = 2
+df_b = n-1
+df_w = n*(k-1)
+
+
+for (i_edge in 1:length(psd_vaild)){
+  x= data.frame(unlist(z_target[,i_edge]),unlist(z_database[,i_edge]) )
+  x_w_mean =  rowMeans(x)
+  x_g_mean = mean(unlist(x))
+  ss_t = sum(((x - x_g_mean)^2))
+  ss_w = sum((x - (x_w_mean))^2)
+  ss_b = ss_t - ss_w
+  ms_b = ss_b / df_b
+  ms_w = ss_w / df_w
+  icc[i_edge] = (ms_b - ms_w) / (ms_b + ((k-1)*ms_w))
+  
+  
+}
+
+icc_mat_older <- matrix(icc, nrow = 148, byrow = TRUE)
+write.csv(icc_mat_older, '~/Documents/CAMCAN_outputs/CamCANDesterieux_outputs/ICC_AperiodicCorr_features_older_adults.csv')
+
+icc_diff= icc_mat_older- icc_mat_young
+
+write.csv(icc_diff, '~/Documents/CAMCAN_outputs/CamCANDesterieux_outputs/ICC_AperiodicCorr_diff_between_young_and_older_analysis.csv')
+
+
+```
+
+
+
+``` {r plotting ICC of older adults vs young adult}
+
+# reorder CamCAN matrix
+atlas=read.csv('/Users/jason/Desktop/Destrieux_neuromaps/Neuromaps_destrieux_full_atlas.csv')
+
+ICC= read.csv('~/Documents/CAMCAN_outputs/CamCANDesterieux_outputs/ICC_diff_between_young_and_older_analysis.csv')
+
+ICC=ICC[-1]
+
+icc_diff=data.frame(delta= rowMeans(ICC[,1:8]),theta= rowMeans(ICC[,9:16]),alpha= rowMeans(ICC[,17:26]),beta= rowMeans(ICC[,27:60]), gamma= rowMeans(ICC[,61:101]), hgamma= rowMeans(ICC[,102:300]))
+
+someData= data.frame(region=atlas$region, ICC= rowMeans(icc_diff), hemi=atlas$hemi)
+
+someData$ICC[someData$ICC > 0.1] =0.1
+someData$ICC[someData$ICC < -0.1] = -0.1
+
+ggplot(someData) +
+  geom_brain(atlas = desterieux, 
+             position = position_brain(hemi ~ side),
+             aes(fill = ICC)) + scale_fill_gradient2(low = "#159D0A", mid = "#FCF7F4", high = "#D90999", midpoint = 0.0, limits=c(-0.1, 0.1 ))+
+  theme_void() 
+
+ggsave('~/Documents/CAMCAN_outputs/figures/DESTERIEUX_ICC_brainmap_broadband.pdf', device = "pdf", width= 5, height =5)
+
+
+ICC= read.csv('~/Documents/CAMCAN_outputs/CamCANDesterieux_outputs/ICC_AperiodicCorr_diff_between_young_and_older_analysis.csv')
+
+ICC=ICC[-1]
+
+icc_diff=data.frame(theta= rowMeans(ICC[,1:8]),
+                                 alpha= rowMeans(ICC[,9:18]),
+                                 beta= rowMeans(ICC[,19:52]), 
+                                 gamma= rowMeans(ICC[,53:73]))
+
+someData= data.frame(region=atlas$region, ICC= rowMeans(icc_diff), hemi=atlas$hemi)
+
+someData$ICC[someData$ICC > 0.2] =0.2
+someData$ICC[someData$ICC < -0.1] = -0.1
+
+ggplot(someData) +
+  geom_brain(atlas = desterieux, 
+             position = position_brain(hemi ~ side),
+             aes(fill = ICC)) + scale_fill_gradient2(low = "#159D0A", mid = "#FCF7F4", high = "#D90999", midpoint = 0.0, limits=c(-0.1, 0.2 ))+
+  theme_void() 
+
+ggsave('~/Documents/CAMCAN_outputs/figures/DESTERIEUX_ICC_brainmap_aperiodic.pdf', device = "pdf", width= 5, height =5)
+
+
+```
+
+
+
+
+``` {r plotting SVR Cattell PCA}
+
+# set colour palette
+cbbPalette= c( "#15A705","#D81B99",'#4F89E0')
+
+predictions=read.csv( '~/Documents/CAMCAN_outputs/CAMCAN_destriuex_fingerprintPCA/data2share/decode_SVR_Catell_80_20_from_all_feat_PCA.csv')
+predictions=predictions[,-1]
+
+demo2= demo[!is.na(demo$Catell_score),]
+
+cor.test(demo2$age, demo2$Catell_score)
+cor.test(colMeans(predictions, na.rm=TRUE), demo2$Catell_score)
+cor.test(colMeans(predictions, na.rm=TRUE), demo2$age)
+
+corr_pred=c()
+for (i in 1:1000) {
+  
+  temp=as.matrix(predictions[i,])
+  indd= which(!is.na(temp))
+  corr_pred[i]= cor(temp[indd], demo2$Catell_score[indd])
+  
+}
+
+data4plot= data.frame(decoded= colMeans(predictions, na.rm=TRUE), observed= demo2$Catell_score)
+
+lm3=lm(decoded ~ observed, data4plot)
+summary(lm3)
+sjPlot::tab_model(lm3)
+
+ggplot(data4plot, aes(x=observed , y = decoded)) + 
+  geom_jitter(aes(colour= demo2$age)) + 
+  stat_smooth(method = "lm", colour = 'black',fullrange = T) +
+  labs(title = paste("Adj R2 = ", signif(summary(lm3)$adj.r.squared, 5),
+                     "Intercept =", signif(lm3$coef[[1]],5 ),
+                     " Slope =", signif(lm3$coef[[2]], 5),
+                     " P =", signif(summary(lm3)$coef[2,4], 5) )) +
+  scale_color_gradient2(low="#15A705", mid="#4F89E0", high="#D81B99", 
+                      midpoint=54,   
+                       limits=c(18, 89 ))+
+theme_classic2() +   xlab("observed Catell") + ylab("decoding Catell")+
+  theme(axis.text=element_text(size=12),
+        axis.title=element_text(size=14,face="bold"), legend.position = "none") 
+
+ggsave('~/Documents/CAMCAN_outputs/figures/DESTERIEUX_ICC_broadband_PCA_scatter.pdf', device = "pdf", width=5, height=5, dpi=800)
+
+ggplot(data4plot, aes(x=observed , y = decoded)) + 
+  geom_jitter(aes(colour= demo2$age)) + 
+  stat_smooth(method = "lm", colour = 'black',fullrange = T) +
+  labs(title = paste("Adj R2 = ", signif(summary(lm3)$adj.r.squared, 5),
+                     "Intercept =", signif(lm3$coef[[1]],5 ),
+                     " Slope =", signif(lm3$coef[[2]], 5),
+                     " P =", signif(summary(lm3)$coef[2,4], 5) )) +
+  scale_color_gradient2(low="#15A705", mid="#4F89E0", high="#D81B99", 
+                      midpoint=54,   
+                       limits=c(18, 89 ))+
+theme_classic2() +   xlab("observed Catell") + ylab("decoding Catell")+
+  theme(axis.text=element_text(size=12),
+        axis.title=element_text(size=14,face="bold")) 
+
+ggsave('~/Documents/CAMCAN_outputs/figures/DESTERIEUX_ICC_broadband_PCA_scatterlegend.pdf', device = "pdf", width=5, height=5, dpi=800)
+
+
+data4plot= data.frame(corr= corr_pred)
+
+ggplot(data4plot, aes(corr, color= 'Group', fill= 'Group')) + 
+  geom_density(aes( color= 'Group', fill= 'Group')) +
+  ggpubr::theme_classic2() + geom_vline(xintercept = 0, linetype= 'dashed') +
+  labs(x = "correlation b/w observed and predicted", y = "denstity")  + 
+  ggtitle("") + scale_fill_manual(values=cbbPalette[c(3)]) + scale_color_manual(values=cbbPalette[c(3)]) + theme(legend.position = 'none')
+  
+ggsave('~/Documents/CAMCAN_outputs/figures/DESTERIEUX_ICC_broadband_PCA_histogram.pdf', device = "pdf", width=5, height=5, dpi=800)
+
+
+```
+
+

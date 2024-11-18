@@ -1,0 +1,251 @@
+---
+title: "Anatomical_variation"
+output: html_document
+date: "2023-05-16"
+---
+
+```{r read in data and organize into one big marix Destriuex }
+library(ggseg)
+library(ggplot2)
+library(dplyr)
+library(BayesFactor)
+
+cbbPalette= c("#4f89e0", "#f54c6c","#76D224", '#e4e000', '#4d1f90')
+
+setwd('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/')
+
+demo= read.csv('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/demo_clean_no_duplicates.csv')
+demo= demo[order(demo$UniqueID),]
+demo= demo[1:403,]
+
+subj_Id_psd= read.csv('./outputs/subject_brainstorm_ids.csv', header = TRUE)
+
+setwd('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/FreesurferStats/')
+subjanat= list.dirs('./')
+subjanat=substr(subjanat[2:403], 3, 20)
+
+# note remove this when all subjets have been processed and accounted for
+demo=demo[c(1:29, 31:240, 242:404),]
+index=order(subjanat)
+subjanat_order=subjanat[index]
+
+paste('sub-',demo$UniqueID, sep = '') == subjanat[index]
+sum(paste('sub-',demo$UniqueID, sep = '') == subjanat[index], na.rm = TRUE)
+
+
+anatomy=matrix(nrow = 401, ncol = 9*148)
+count=1;
+
+rowname= t(read.csv('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/outputs/ROIs.csv', header = FALSE))
+
+ROIs=substr(rowname, 1, nchar(rowname)-2)[seq(1,148,2)]
+
+#data_L[order(match(data_L$label,ROIs)),]
+
+subjects=subjanat[index][1:401]
+# loop through files and read anat stats left 
+for(i in subjects ){
+  
+  data_temp=matrix(nrow = 148, ncol = 9)
+  if (i != 'sub-TC33' & i!= 'sub-TC34'){
+  file=paste('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/FreesurferStats/', i, '/lh.aparc.a2009s.stats', sep='')
+  data_L=read_freesurfer_stats(file)
+  data_L=data_L[order(match(data_L$label,ROIs)),]
+  
+    file=paste('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/FreesurferStats/', i, '/rh.aparc.a2009s.stats', sep='')
+  data_R=read_freesurfer_stats(file)
+  data_R=data_R[order(match(data_R$label,ROIs)),]
+  data_temp[seq(1,148,2),]=as.matrix(data_L[,2:10])
+  data_temp[seq(2,148,2),]=as.matrix(data_R[,2:10])
+  anatomy[count,]= as.vector(t(data_temp))
+  }
+  count=count+1
+}
+
+
+```
+
+
+
+```{r organize data demographics & rhythmic similarity}
+
+setwd('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/')
+
+demo= read.csv('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/demo_clean_no_duplicates.csv')
+demo= demo[order(demo$UniqueID),]
+demo= demo[1:403,]
+
+psd_training = read.csv('./outputs/BIC_PSD_training.csv', header = FALSE)
+psd_validation = psd_training[seq(2,802,2),]
+psd_training= psd_training[seq(1,802,2),]
+
+subj_Id_psd= read.csv('./outputs/subject_brainstorm_ids.csv', header = TRUE)
+
+# note remove this when all subjets have been processed and accounted for
+demo=demo[c(1:29, 31:240, 242:404),]
+index=order(subj_Id_psd$subjID)
+subj_psd_order=subj_Id_psd$subjID[index]
+
+paste('sub-',demo$UniqueID, sep = '') == subj_Id_psd$subjID[index]
+sum(paste('sub-',demo$UniqueID, sep = '') == subj_Id_psd$subjID[index])
+
+
+psd_training= psd_training[index,]
+psd_validation= psd_validation[index,]
+
+demo=demo[1:401,]
+demo$Group= 'below 12 years old'
+demo$Group[demo$Age >=12 & demo$Age <18]= '12-18 years old'
+demo$Group[demo$Age >=18]= '18+ years old'
+
+
+corr_psd=cor(t(psd_training),t(psd_validation)) 
+demo$psd_self_corr=diag(corr_psd)
+demo$psd_identifiability=diag(apply(corr_psd, 2, scale))
+
+# anatomical centile data from brain charts paper (see methods)
+centiles=read.csv('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/Freesurfer_centile_data_braincharts.csv')
+
+demo$centiles = rowMeans(centiles[,49:51])
+demo$centileCT = (centiles[,48])
+
+cor.test(demo$psd_identifiability, demo$centiles)
+
+
+ggplot(demo, aes(x=centiles , y = psd_identifiability)) + 
+  geom_jitter(aes(fill=Sex, colour= Sex, shape= Sex), size=2) + 
+  stat_smooth(method = "lm", fullrange = T) +
+   scale_fill_manual(values=cbbPalette)  + scale_color_manual(values=cbbPalette)+
+  ggpubr::theme_classic2() +   ylab("differentiability") + xlab("centile") + theme(axis.text=element_text(size=12),
+        axis.title=element_text(size=14,face="bold")) + xlim(0, 1)
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/Scatter_centile_differentiability_DEC.pdf', device = "pdf", width = 5, height = 5)
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/Scatter_centile_differentiability_DEC.jpeg', device = "jpeg", width = 5, height = 5)
+
+
+
+corr_anat=cor(t(anatomy))
+diag(corr_anat)=NA
+
+# check if adults more corr to adults 
+mean(corr_anat[demo$Group=='18+ years old',demo$Group=='18+ years old' ], na.rm=TRUE)
+
+mean(corr_anat[demo$Group=='below 12 years old',demo$Group=='18+ years old' ], na.rm=TRUE)
+
+mean(corr_anat[demo$Group=='below 12 years old',demo$Group=='below 12 years old' ], na.rm=TRUE)
+
+# plot corrs 
+inds=order(demo$Age)
+
+corr_anat2=cor(t(anatomy[inds,]))
+
+data4plot=cbind(stack(as.data.frame(corr_anat2)), rep(1:401, each=401), rep(1:401, 401))
+
+colnames(data4plot)[3:4]= c('Y', 'X')
+
+data4plot$values[data4plot$values < 0.9] =0.9
+
+ggplot(data4plot, aes(X, Y, fill= values)) + 
+  geom_tile() + scale_y_reverse()+  theme_void() + colorspace::scale_fill_continuous_sequential(palette= 'Batlow', rev= FALSE, limits= c(0.93, 1)) + geom_hline(yintercept = 148) + geom_vline(xintercept = 148)
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/Corr_matrix_all_people_anatomy.pdf', device = "pdf", width = 5, height = 5)
+
+
+
+
+data4regression = data.frame(psd_similarity= as.vector(corr_psd), anat_similarity=as.vector(corr_anat), subj1= rep(demo$UniqueID,401), subj2= rep(demo$UniqueID,each=401), Group1= rep(demo$Group,each=401), Group2= rep(demo$Group,401))
+
+data4regression= na.omit(data4regression)
+data4regression$anat_similarity[data4regression$anat_similarity==1]= 0.99
+
+kids=DescTools::FisherZ(data4regression$anat_similarity[data4regression$Group1 == 'below 12 years old' & data4regression$Group2 == 'below 12 years old'])
+adults= DescTools::FisherZ(data4regression$anat_similarity[data4regression$Group1 == '18+ years old' & data4regression$Group2 == '18+ years old'])
+RVAideMemoire::perm.t.test(kids, adults)
+
+cor.test(DescTools::FisherZ(data4regression$psd_similarity[data4regression$Group1 == 'below 12 years old' & data4regression$Group2 == 'below 12 years old']), DescTools::FisherZ(data4regression$anat_similarity[data4regression$Group1 == 'below 12 years old' & data4regression$Group2 == 'below 12 years old']))
+
+cor.test(DescTools::FisherZ(data4regression$psd_similarity[data4regression$Group1 == '12-18 years old' & data4regression$Group2 == '12-18 years old']), DescTools::FisherZ(data4regression$anat_similarity[data4regression$Group1 == '12-18 years old' & data4regression$Group2 == '12-18 years old']))
+
+cor.test(DescTools::FisherZ(data4regression$psd_similarity[data4regression$Group1 == '18+ years old' & data4regression$Group2 == '18+ years old']), DescTools::FisherZ(data4regression$anat_similarity[data4regression$Group1 == '18+ years old' & data4regression$Group2 == '18+ years old']))
+
+cor.test(DescTools::FisherZ(data4regression$psd_similarity), DescTools::FisherZ(data4regression$anat_similarity))
+
+data4plot= data4regression[data4regression$Group1==data4regression$Group2,]
+data4plot$Group1= factor(data4plot$Group1, levels= c('below 12 years old', '12-18 years old', '18+ years old'))
+
+ggplot(data4plot, aes(x=DescTools::FisherZ(data4plot$psd_similarity) , y = DescTools::FisherZ(data4plot$anat_similarity), fill=Group1, color=Group1)) + 
+  geom_jitter() + 
+  stat_smooth(method = "lm", colour = 'black',fullrange = T, fill = cbbPalette[2]) + scale_fill_manual(values=cbbPalette)  +
+  ggpubr::theme_classic2() +   ylab("anatomical similarity") + xlab("psd similairty")+
+  theme(axis.text=element_text(size=12),
+        axis.title=element_text(size=14,face="bold"), legend.position = "none") + facet_wrap(~Group1) + coord_cartesian(ylim = c(0,5))
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/Scatter_similarity_of_psd_and_anatomy.pdf', device = "pdf", width = 15, height = 5)
+
+
+
+```
+
+
+
+```{r compute similarity matrix for sturcture and function full PSD }
+
+corr_psd=cor(t(psd_training),t(psd_validation)) 
+demo$psd_self_corr=diag(corr_psd)
+demo$psd_identifiability=diag(apply(corr_psd, 2, scale))
+
+print("psd fingerprinting:")
+tt=apply(corr_psd, 1, which.max)
+sum(seq(1:401)==tt)/401
+tt=apply(corr_psd, 2, which.max)
+sum(seq(1:401)==tt)/401
+
+corr_anat=cor(t(anatomy))
+diag(corr_anat)=NA
+# check if adults more corr to adults 
+mean(corr_anat[demo$Group=='18+ years old',demo$Group=='18+ years old' ], na.rm=TRUE)
+
+mean(corr_anat[demo$Group=='below 12 years old',demo$Group=='18+ years old' ], na.rm=TRUE)
+
+mean(corr_anat[demo$Group=='below 12 years old',demo$Group=='below 12 years old' ], na.rm=TRUE)
+
+# plot corrs 
+inds=order(demo$Age)
+
+corr_anat2=cor(t(anatomy[inds,]))
+
+data4plot=cbind(stack(as.data.frame(corr_anat2)), rep(1:401, each=401), rep(1:401, 401))
+
+colnames(data4plot)[3:4]= c('Y', 'X')
+
+data4plot$values[data4plot$values < 0.9] =0.9
+
+ggplot(data4plot, aes(X, Y, fill= values)) + 
+  geom_tile() + scale_y_reverse()+  theme_void() + colorspace::scale_fill_continuous_sequential(palette= 'Plasma', rev= FALSE, limits= c(0.9, 1))
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/Corr_matrix_all_people_anatomy.pdf', device = "pdf", width = 5, height = 5)
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/Corr_matrix_all_people_anatomy.jpeg', device = "jpeg", width = 5, height = 5)
+
+
+
+data4regression = data.frame(psd_similarity= as.vector(corr_psd), anat_similarity=as.vector(corr_anat), subj1= rep(demo$UniqueID,401), subj2= rep(demo$UniqueID,each=401), Group1= rep(demo$Group,each=401), Group2= rep(demo$Group,401))
+
+data4regression= na.omit(data4regression)
+data4regression$anat_similarity[data4regression$anat_similarity==1]= 0.99
+
+kids=DescTools::FisherZ(data4regression$anat_similarity[data4regression$Group1 == 'below 12 years old' & data4regression$Group2 == 'below 12 years old'])
+adults= DescTools::FisherZ(data4regression$anat_similarity[data4regression$Group1 == '18+ years old' & data4regression$Group2 == '18+ years old'])
+RVAideMemoire::perm.t.test(kids, adults)
+
+cor.test(DescTools::FisherZ(data4regression$psd_similarity[data4regression$Group1 == 'below 12 years old' & data4regression$Group2 == 'below 12 years old']), DescTools::FisherZ(data4regression$anat_similarity[data4regression$Group1 == 'below 12 years old' & data4regression$Group2 == 'below 12 years old']))
+
+cor.test(DescTools::FisherZ(data4regression$psd_similarity[data4regression$Group1 == '12-18 years old' & data4regression$Group2 == '12-18 years old']), DescTools::FisherZ(data4regression$anat_similarity[data4regression$Group1 == '12-18 years old' & data4regression$Group2 == '12-18 years old']))
+
+cor.test(DescTools::FisherZ(data4regression$psd_similarity[data4regression$Group1 == '18+ years old' & data4regression$Group2 == '18+ years old']), DescTools::FisherZ(data4regression$anat_similarity[data4regression$Group1 == '18+ years old' & data4regression$Group2 == '18+ years old']))
+
+
+```
+
+

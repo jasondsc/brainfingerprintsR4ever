@@ -1,0 +1,1741 @@
+---
+title: "SickKids Fingerprinting"
+output: html_document
+date: "2023-03-01"
+---
+
+Read in data from tables and organize it to explore in regressions 
+See how it relates to age
+
+```{r cleaning data and demographics}
+library(ggplot2)
+library(dplyr)
+library(BayesFactor)
+
+cbbPalette= c("#4f89e0", "#f54c6c","#76D224", '#e4e000', '#4d1f90')
+
+
+setwd('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/')
+
+demo= read.csv('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/demo_clean_no_duplicates.csv')
+demo= demo[order(demo$UniqueID),]
+demo= demo[1:403,]
+
+psd_training = read.csv('./outputs/BIC_PSD_training.csv', header = FALSE)
+psd_validation = psd_training[seq(2,802,2),]
+psd_training= psd_training[seq(1,802,2),]
+
+
+aperPSD_training = read.csv('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting//outputs/BIC_aperioidc_Rest.csv', header = FALSE)
+aperPSD_validation = aperPSD_training[seq(2,802,2),]
+aperPSD_training= aperPSD_training[seq(1,802,2),]
+
+
+corrPSD_training = read.csv('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting//outputs/BIC_corrspec_BIC.csv', header = FALSE)
+corrPSD_validation = corrPSD_training[seq(2,802,2),]
+corrPSD_training= corrPSD_training[seq(1,802,2),]
+
+subj_Id_psd= read.csv('./outputs/subject_brainstorm_ids.csv', header = TRUE)
+
+# note remove this when all subjets have been processed and accounted for
+demo=demo[c(1:29, 31:240, 242:404),]
+index=order(subj_Id_psd$subjID)
+subj_psd_order=subj_Id_psd$subjID[index]
+
+paste('sub-',demo$UniqueID, sep = '') == subj_Id_psd$subjID[index]
+sum(paste('sub-',demo$UniqueID, sep = '') == subj_Id_psd$subjID[index])
+
+
+psd_training= psd_training[index,]
+psd_validation= psd_validation[index,]
+
+aperPSD_training= aperPSD_training[index,]
+aperPSD_validation= aperPSD_validation[index,]
+
+corrPSD_training= corrPSD_training[index,]
+corrPSD_validation= corrPSD_validation[index,]
+
+
+demo=demo[1:401,]
+demo$Group= 'below 12 years old'
+demo$Group[demo$Age >=12 & demo$Age <18]= '12-18 years old'
+demo$Group[demo$Age >=18]= '18+ years old'
+
+
+``` 
+
+
+```{r self correlations & fingerprinting}
+
+corr_psd=cor(t(psd_training),t(psd_validation)) 
+demo$psd_self_corr=diag(corr_psd)
+demo$psd_identifiability=diag(apply(corr_psd, 2, scale))
+
+print("psd fingerprinting:")
+tt=apply(corr_psd, 1, which.max)
+sum(seq(1:401)==tt)/401
+tt=apply(corr_psd, 2, which.max)
+sum(seq(1:401)==tt)/401
+
+
+ggplot(demo, aes(psd_self_corr, color= Group, fill=group, alpha=0.5)) +
+  geom_density(aes( color= Group, fill=Group), alpha= 0.5) +
+  ggpubr::theme_classic2() +
+  labs(x = "self-similarity", y = "denstity")  + xlim(c(0.5,1)) +
+  ggtitle("") + scale_fill_manual(values=cbbPalette[c(1:3)]) + scale_color_manual(values=cbbPalette[c(1:3)]) 
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/self_corr_per_age_group_hist.pdf', device = "pdf")
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/self_corr_per_age_group_hist.jpeg', device = "jpeg")
+
+
+ggplot(demo, aes(psd_self_corr, color= Group, fill=group, alpha=0.5)) +
+  geom_density(aes( color= Group, fill=Group), alpha= 0.5) +
+  ggpubr::theme_classic2() +
+  labs(x = "self-similarity", y = "denstity")  + xlim(c(0.85,1)) +
+  ggtitle("") + scale_fill_manual(values=cbbPalette[c(1:3)]) + scale_color_manual(values=cbbPalette[c(1:3)]) 
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/self_corr_per_age_group_hist_xlimits.pdf', device = "pdf")
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/self_corr_per_age_group_hist_xlimits.jpeg', device = "jpeg")
+
+
+
+RVAideMemoire::perm.t.test(demo$psd_self_corr[demo$Group == "below 12 years old"],demo$psd_self_corr[demo$Group == "18+ years old"], nperm=1000)
+
+demo$psd_self_corr_trans= DescTools::FisherZ(demo$psd_self_corr)
+cor_test_autocorr=cor.test(demo$Age, demo$psd_self_corr_trans)
+bf_corr = correlationBF(demo$Age, demo$psd_self_corr_trans, whichModels = "top")
+summary(bf_corr)
+
+ggplot(demo, aes(x=Age , y = psd_self_corr_trans, fill=cbbPalette[1])) + 
+  geom_jitter(colour = cbbPalette[1]) + 
+  stat_smooth(method = "lm", colour = 'black',fullrange = T, fill = cbbPalette[1]) +
+  labs(title = paste("R = ", signif(cor_test_autocorr$estimate, 2),
+                     "t =", signif(cor_test_autocorr$statistic,2 ),
+                      " bf =", signif(1/exp(bf_corr@bayesFactor$bf), 2),
+                     " P =", signif(cor_test_autocorr$p.value, 2) )) + scale_fill_manual(values=cbbPalette)  +
+  ggpubr::theme_classic2() +   ylab("auto-correlation") + xlab("Age")+
+  theme(axis.text=element_text(size=12),
+        axis.title=element_text(size=14,face="bold"), legend.position = "none") 
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/Scatter_AGE_FisherZautocorrelations.pdf', device = "pdf", width = 5, height = 5)
+
+cor_test_diff=cor.test(demo$Age, demo$psd_identifiability)
+bf_diff = correlationBF(demo$Age, demo$psd_identifiability, whichModels = "top")
+summary(bf_diff)
+
+ggplot(demo, aes(x=Age , y = psd_identifiability, fill=cbbPalette[2])) + 
+  geom_jitter(colour = cbbPalette[2]) + 
+  stat_smooth(method = "lm", colour = 'black',fullrange = T, fill = cbbPalette[2]) +
+  labs(title = paste("R = ", signif(cor_test_diff$estimate, 2),
+                     "t =", signif(cor_test_diff$statistic,2 ),
+                     " bf =", signif(1/exp(bf_diff@bayesFactor$bf), 2),
+                     " P =", signif(cor_test_diff$p.value, 2) )) + scale_fill_manual(values=cbbPalette)  +
+  ggpubr::theme_classic2() +   ylab("differentiability") + xlab("Age")+
+  theme(axis.text=element_text(size=12),
+        axis.title=element_text(size=14,face="bold"), legend.position = "none") 
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/Scatter_AGE_differentiability22.pdf', device = "pdf", width = 5, height = 5)
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/Scatter_AGE_differentiability22.jpeg', device = "jpeg", width = 5, height = 5)
+
+
+
+ggplot(demo, aes(x=Age , y = psd_identifiability)) + 
+  geom_jitter(aes(fill=Sex, colour= Sex, shape= Sex), size=4) + 
+  stat_smooth(method = "lm", colour = 'black',fullrange = T, fill = cbbPalette[2]) +
+  labs(title = paste("R = ", signif(cor_test_diff$estimate, 2),
+                     "t =", signif(cor_test_diff$statistic,2 ),
+                     " bf =", signif(1/exp(bf_diff@bayesFactor$bf), 2),
+                     " P =", signif(cor_test_diff$p.value, 2) )) + scale_fill_manual(values=cbbPalette)  +
+  ggpubr::theme_classic2() +   ylab("differentiability") + xlab("Age")+
+  theme(axis.text=element_text(size=12),
+        axis.title=element_text(size=14,face="bold"), legend.position = "none") 
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/Scatter_AGE_differentiability.pdf', device = "pdf", width = 6, height = 5)
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/Scatter_AGE_differentiability.jpeg', device = "jpeg", width = 6, height = 5)
+
+
+
+lm0=lm(psd_identifiability ~ 1, demo)
+lm1=lm(psd_identifiability ~ Age, demo)
+lm2=lm(psd_identifiability ~ Age + Sex, demo)
+lm3=lm(psd_identifiability ~ Age * Sex, demo)
+
+anova(lm0,lm1,lm2,lm3)
+sjPlot::tab_model(lm2)
+
+
+lm3=lm(psd_identifiability ~ poly(Age,2)*Sex, demo)
+
+
+ggplot(demo, aes(x=Age , y = psd_identifiability, fill=Sex, colour= Sex, shape= Sex)) + 
+  geom_jitter() + 
+  stat_smooth(method = "lm", fullrange = T) +
+   scale_fill_manual(values=cbbPalette)  + scale_color_manual(values=cbbPalette)+
+  ggpubr::theme_classic2() +   ylab("differentiability") + xlab("Age") + theme(axis.text=element_text(size=12),
+        axis.title=element_text(size=14,face="bold")) 
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/Scatter_AGE_differentiability_SEX.pdf', device = "pdf", width = 5, height = 5)
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/Scatter_AGE_differentiability_SEX.jpeg', device = "jpeg", width = 5, height = 5)
+
+
+
+
+ggplot(demo, aes(x=Age , y = psd_identifiability, fill=Sex, colour= Sex, shape= Sex)) + 
+  geom_jitter() + 
+  stat_smooth(method = "lm", fullrange = T) +
+   scale_fill_manual(values=cbbPalette)  + scale_color_manual(values=cbbPalette)+
+  ggpubr::theme_classic2() +   ylab("differentiability") + xlab("Age") + theme(axis.text=element_text(size=12),
+        axis.title=element_text(size=14,face="bold")) + xlim(4, 12)
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/Scatter_AGE_differentiability_SEX_just_kids.pdf', device = "pdf", width = 5, height = 5)
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/Scatter_AGE_differentiability_SEX_just_kids.jpeg', device = "jpeg", width = 5, height = 5)
+
+
+```
+
+
+
+```{r cross_correlations}
+
+inds=order(demo$Age)
+ages_or=demo$Age[inds]
+groups_or= demo$Group[inds]
+sex_or=demo$Sex[inds]
+
+
+corr_psd=cor(t(psd_training[inds,]),t(psd_validation[inds, ])) 
+
+data4plot=cbind(stack(as.data.frame(corr_psd)), rep(1:401, each=401), rep(1:401, 401))
+
+colnames(data4plot)[3:4]= c('Y', 'X')
+
+data4plot$values[data4plot$values < 0.75] =0.75
+
+ggplot(data4plot, aes(X, Y, fill= values)) + 
+  geom_tile() + scale_y_reverse()+  theme_void() + colorspace::scale_fill_continuous_sequential(palette= 'Plasma', rev= FALSE, limits= c(0.75, 1)) + geom_hline(yintercept = 148) + geom_vline(xintercept = 148)
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/Corr_matrix_all_people.pdf', device = "pdf", width = 5, height = 5)
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/Corr_matrix_all_people.jpeg', device = "jpeg", width = 5, height = 5)
+
+
+data4plot=cbind(stack(as.data.frame(corr_psd)), rep(ages_or, each=401), rep(ages_or, 401), rep(groups_or, 401), rep(cut(ages_or, breaks=c(0, 10, 15,20,25,30,35,40,70)),each=401), sex1=rep(sex_or, each=401), sex2= rep(sex_or, 401))
+colnames(data4plot)[c(3,4,5,6)]= c('age1', 'age2', 'Group', 'agebin', 'sex1', 'sex2')
+
+plottt=data4plot %>% group_by(Group, agebin) %>% summarise(mean_corr= mean(values, na.rm=TRUE), CI_upp= mean(values, na.rm=TRUE)+ (sd(values, na.rm=TRUE)/sqrt(n())), CI_low= mean(values, na.rm=TRUE)- (sd(values, na.rm=TRUE)/sqrt(n())) )
+
+ggplot(plottt, aes(x=agebin, y = mean_corr, color= Group, fill=Group, group= Group)) + geom_line() +
+  geom_point(size=4) +
+  geom_ribbon(aes(,x=agebin, y = mean_corr, fill=Group, ymin = CI_low, ymax = CI_upp), alpha = .5) + xlab('age') + ylab('other similairty') + scale_fill_manual(values=cbbPalette[c(1:3)]) + scale_color_manual(values=cbbPalette[c(1:3)])  + coord_cartesian(ylim = c(0.7, 1)) +coord_flip(ylim = c(0.7, 1)) + scale_x_discrete(limits = rev(levels(plottt$agebin))) + ggpubr::theme_classic2() + theme(legend.position = 'none')
+
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/smoothed_crosscorrelation_across-age.pdf', device = "pdf")
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/smoothed_crosscorrelation_across-age.jpeg', device = "jpeg")
+
+
+
+
+inds=order(demo$Age)
+ages_or=demo$Age[inds]
+groups_or= demo$Group[inds]
+sex_or=demo$Sex[inds]
+
+
+corr_psd=cor(t(psd_training[inds,]),t(psd_validation[inds, ]))
+
+data4plot=cbind(stack(as.data.frame(corr_psd)), rep(ages_or, each=401), rep(ages_or, 401), rep(groups_or, 401), rep(cut(ages_or, breaks=c(0, 10, 15,20,25,30,35,40,70)),each=401), sex1=rep(sex_or, each=401), sex2= rep(sex_or, 401))
+colnames(data4plot)[c(3,4,5,6)]= c('age1', 'age2', 'Group', 'agebin', 'sex1', 'sex2')
+
+plottt=data4plot[data4plot$Group == 'below 12 years old',]
+plottt$SEX = paste(plottt$sex1, plottt$sex2)
+
+ggplot(plottt, aes(SEX, values, fill=SEX)) + 
+  ggdist::stat_halfeye(adjust = .5, width = .5, .width = 0, justification = -.5, alpha=0.5, point_alpha= 0) + 
+  geom_boxplot(width = .3, outlier.shape = NA, colour= '#888888') + ggpubr::theme_classic2() + scale_fill_manual(values=cbbPalette)
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/other-similairty_sex_children.pdf', device = "pdf")
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/other-similairty_sex_children.jpeg', device = "jpeg")
+
+
+
+# now plot the same thing for self corr
+
+
+data4plot=data.frame(values=diag(corr_psd), ages1=ages_or,Group=groups_or, agebin=cut(ages_or, breaks=c(0, 10, 15,20,25,30,35,40,70)))
+
+plottt=data4plot %>% group_by(agebin) %>% summarise(mean_corr= mean(values, na.rm=TRUE), CI_upp= mean(values, na.rm=TRUE)+ (sd(values, na.rm=TRUE)/sqrt(n())), CI_low= mean(values, na.rm=TRUE)- (sd(values, na.rm=TRUE)/sqrt(n())))
+
+ggplot(plottt, aes(x=agebin, y = mean_corr, group='self-similarity')) + geom_line(linetype='longdash', colour= 'grey') + geom_ribbon(aes(,x=agebin, y = mean_corr, ymin = CI_low, ymax = CI_upp), alpha = .5)+ xlab('age') + ylab('other similairty') +  coord_cartesian(ylim = c(0.7, 1)) +coord_flip(ylim = c(0.7, 1)) + scale_x_discrete(limits = rev(levels(plottt$agebin)))+ ggpubr::theme_classic2()
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/smoothed_seelf_similairt_across-age.pdf', device = "pdf")
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/smoothed_seelf_similairty_across-age.jpeg', device = "jpeg")
+
+
+inds=demo$Age <12
+
+corr_psd=cor(t(psd_training[inds,]),t(psd_validation[inds, ])) 
+
+data4plot=cbind(stack(as.data.frame(corr_psd)), rep(1:148, each=148), rep(1:148, 148))
+
+colnames(data4plot)[3:4]= c('Y', 'X')
+
+data4plot$values[data4plot$values < 0.75] =0.75
+
+ggplot(data4plot, aes(X, Y, fill= values)) + 
+  geom_tile() + scale_y_reverse()+  theme_void() + colorspace::scale_fill_continuous_sequential(palette= 'Plasma', rev= FALSE, limits= c(0.75, 1))
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/Corr_matrix_kids_below12.pdf', device = "pdf", width = 5, height = 5)
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/Corr_matrix_kids_below12.jpeg', device = "jpeg", width = 5, height = 5)
+
+
+diag(corr_psd)= NaN
+
+children_cross= stack(as.data.frame(corr_psd))
+
+inds=demo$Age <18 & demo$Age >=12
+
+corr_psd=cor(t(psd_training[inds,]),t(psd_validation[inds, ])) 
+
+data4plot=cbind(stack(as.data.frame(corr_psd)), rep(1:57, each=57), rep(1:57, 57))
+
+colnames(data4plot)[3:4]= c('Y', 'X')
+
+data4plot$values[data4plot$values < 0.75] =0.75
+
+ggplot(data4plot, aes(X, Y, fill= values)) + 
+  geom_tile() + scale_y_reverse()+  theme_void() + colorspace::scale_fill_continuous_sequential(palette= 'Plasma', rev= FALSE, limits= c(0.75, 1))
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/Corr_matrix_kids_teens.pdf', device = "pdf", width = 5, height = 5)
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/Corr_matrix_kids_teens.jpeg', device = "jpeg", width = 5, height = 5)
+
+diag(corr_psd)= NaN
+
+teens_cross= stack(as.data.frame(corr_psd))
+
+inds=demo$Age >=18
+
+corr_psd=cor(t(psd_training[inds,]),t(psd_validation[inds, ])) 
+
+data4plot=cbind(stack(as.data.frame(corr_psd)), rep(1:196, each=196), rep(1:196, 196))
+
+colnames(data4plot)[3:4]= c('Y', 'X')
+
+data4plot$values[data4plot$values < 0.75] =0.75
+
+ggplot(data4plot, aes(X, Y, fill= values)) + 
+  geom_tile() + scale_y_reverse()+  theme_void() + colorspace::scale_fill_continuous_sequential(palette= 'Plasma', rev= FALSE, limits= c(0.75, 1))
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/Corr_matrix_kids_adults.pdf', device = "pdf", width = 5, height = 5)
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/Corr_matrix_kids_adults.jpeg', device = "jpeg", width = 5, height = 5)
+
+diag(corr_psd)= NaN
+
+adult_cross= stack(as.data.frame(corr_psd))
+
+# plot cross cors
+
+
+data4plot_corss= data.frame(values= c(children_cross[,1], teens_cross[,1],adult_cross[,1]), Group= c(rep('below 12', dim(children_cross)[1]), rep('12-18 years old', dim(teens_cross)[1]), rep('adults', dim(adult_cross)[1])))
+
+
+
+ggplot(data4plot_corss, aes(values, color= Group, fill=group, alpha=0.5)) +
+  geom_density(aes( color= Group, fill=Group), alpha= 0.5) +
+  ggpubr::theme_classic2() +
+  labs(x = "other-similarity", y = "denstity")  + xlim(c(0.5,1)) +
+  ggtitle("") + scale_fill_manual(values=cbbPalette[c(1:3)]) + scale_color_manual(values=cbbPalette[c(1:3)]) 
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/cross_corr_per_age_group_hist.pdf', device = "pdf")
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/cross_corr_per_age_group_hist.jpeg', device = "jpeg")
+
+```
+
+
+
+```{r bootstrap fingerprinting effects}
+
+
+fingerprint_boot=matrix(, ncol = 6,nrow=2000)
+
+temp_boot=matrix(, ncol = 2,nrow=1000)
+
+for(i in 1:1000) {
+  index_random_par=sample(1:401, 361)
+  
+  corr_psd=cor(t(psd_training[index_random_par,]),t(psd_validation[index_random_par,])) 
+  tt=apply(corr_psd, 1, which.max)
+  temp_boot[i,1]=sum(seq(1:361)==tt)/361
+  tt=apply(corr_psd, 2, which.max)
+  temp_boot[i,2]=sum(seq(1:361)==tt)/361
+  
+}
+
+fingerprint_boot[,1]= as.vector(temp_boot)
+write.csv(fingerprint_boot, 'C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_output/bootstrapped_fingerprinting_fullcohort2.csv')
+
+mean(as.vector(temp_boot), na.rm = TRUE)
+sd(as.vector(temp_boot), na.rm = TRUE)
+
+
+index_theta=unlist(lapply(1:148, function(x) ((x-1)*293)+(1:8))) # theta
+index_alpha=unlist(lapply(1:148, function(x) ((x-1)*293)+(9:18))) # alpha
+index_beta=unlist(lapply(1:148, function(x) ((x-1)*293)+(19:52))) # beta
+index_gamma=unlist(lapply(1:148, function(x) ((x-1)*293)+(53:92))) # gamma
+index_hgamma=unlist(lapply(1:148, function(x) ((x-1)*293)+(93:293))) # Hgamma
+
+index_bands=list(index_theta, index_alpha,index_beta,index_gamma,index_hgamma)
+
+
+for (j in 1:5){
+  temp_boot=matrix(, ncol = 2,nrow=1000)
+for(i in 1:1000) {
+  index_freq=index_bands[[j]]
+  index_random_par=sample(1:401, 361)
+  
+  corr_psd=cor(t(psd_training[index_random_par,index_freq]),t(psd_validation[index_random_par,index_freq])) 
+  tt=apply(corr_psd, 1, which.max)
+  temp_boot[i,1]=sum(seq(1:361)==tt)/361
+  tt=apply(corr_psd, 2, which.max)
+  temp_boot[i,2]=sum(seq(1:361)==tt)/361
+  
+}
+  fingerprint_boot[,j+1]= as.vector(temp_boot)
+write.csv(fingerprint_boot, 'C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_output/bootstrapped_fingerprinting_fullcohort2.csv')
+
+print(mean(as.vector(temp_boot), na.rm = TRUE))
+print(sd(as.vector(temp_boot), na.rm = TRUE))
+}
+
+beepr::beep(2)
+
+# look @ age groups now 
+# start with below 12
+psd_training_age= psd_training[demo$Group== 'below 12 years old',]
+psd_validation_age= psd_validation[demo$Group== 'below 12 years old',]
+sample_size= dim(psd_validation_age)[1]
+
+fingerprint_boot=matrix(, ncol = 6,nrow=2000)
+
+temp_boot=matrix(, ncol = 2,nrow=1000)
+
+for(i in 1:1000) {
+  index_random_par=sample(1:sample_size, 133)
+  
+  corr_psd=cor(t(psd_training_age[index_random_par,]),t(psd_validation_age[index_random_par,])) 
+  tt=apply(corr_psd, 1, which.max)
+  temp_boot[i,1]=sum(seq(1:133)==tt)/133
+  tt=apply(corr_psd, 2, which.max)
+  temp_boot[i,2]=sum(seq(1:133)==tt)/133
+  
+}
+
+fingerprint_boot[,1]= as.vector(temp_boot)
+write.csv(fingerprint_boot, 'C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_output/bootstrapped_fingerprinting_below122.csv')
+
+
+for (j in 1:5){
+  temp_boot=matrix(, ncol = 2,nrow=1000)
+for(i in 1:1000) {
+  index_freq=index_bands[[j]]
+  index_random_par=sample(1:sample_size, 133)
+  
+    corr_psd=cor(t(psd_training_age[index_random_par,index_freq]),t(psd_validation_age[index_random_par,index_freq]))  
+  tt=apply(corr_psd, 1, which.max)
+  temp_boot[i,1]=sum(seq(1:133)==tt)/133
+  tt=apply(corr_psd, 2, which.max)
+  temp_boot[i,2]=sum(seq(1:133)==tt)/133
+  
+}
+  fingerprint_boot[,j+1]= as.vector(temp_boot)
+write.csv(fingerprint_boot, 'C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_output/bootstrapped_fingerprinting_below122.csv')
+
+print(mean(as.vector(temp_boot), na.rm = TRUE))
+print(sd(as.vector(temp_boot), na.rm = TRUE))
+}
+
+beepr::beep(2)
+
+# TEENS 12-18
+psd_training_age= psd_training[demo$Group== '12-18 years old',]
+psd_validation_age= psd_validation[demo$Group== '12-18 years old',]
+sample_size= dim(psd_validation_age)[1]
+
+fingerprint_boot=matrix(, ncol = 6,nrow=2000)
+
+temp_boot=matrix(, ncol = 2,nrow=1000)
+
+for(i in 1:1000) {
+  index_random_par=sample(1:sample_size, 51)
+  
+  corr_psd=cor(t(psd_training_age[index_random_par,]),t(psd_validation_age[index_random_par,])) 
+  tt=apply(corr_psd, 1, which.max)
+  temp_boot[i,1]=sum(seq(1:51)==tt)/51
+  tt=apply(corr_psd, 2, which.max)
+  temp_boot[i,2]=sum(seq(1:51)==tt)/51
+  
+}
+
+fingerprint_boot[,1]= as.vector(temp_boot)
+write.csv(fingerprint_boot, 'C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_output/bootstrapped_fingerprinting_teens2.csv')
+
+
+for (j in 1:5){
+  temp_boot=matrix(, ncol = 2,nrow=1000)
+for(i in 1:1000) {
+  index_freq=index_bands[[j]]
+  index_random_par=sample(1:sample_size, 51)
+  
+    corr_psd=cor(t(psd_training_age[index_random_par,index_freq]),t(psd_validation_age[index_random_par,index_freq]))  
+  tt=apply(corr_psd, 1, which.max)
+  temp_boot[i,1]=sum(seq(1:51)==tt)/51
+  tt=apply(corr_psd, 2, which.max)
+  temp_boot[i,2]=sum(seq(1:51)==tt)/51
+  
+}
+  fingerprint_boot[,j+1]= as.vector(temp_boot)
+write.csv(fingerprint_boot, 'C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_output/bootstrapped_fingerprinting_teens2.csv')
+
+print(mean(as.vector(temp_boot), na.rm = TRUE))
+print(sd(as.vector(temp_boot), na.rm = TRUE))
+}
+
+beepr::beep(2)
+
+
+
+# adults
+psd_training_age= psd_training[demo$Group== '18+ years old',]
+psd_validation_age= psd_validation[demo$Group== '18+ years old',]
+sample_size= dim(psd_validation_age)[1]
+
+fingerprint_boot=matrix(, ncol = 6,nrow=2000)
+
+temp_boot=matrix(, ncol = 2,nrow=1000)
+
+for(i in 1:1000) {
+  index_random_par=sample(1:sample_size, 176)
+  
+  corr_psd=cor(t(psd_training_age[index_random_par,]),t(psd_validation_age[index_random_par,])) 
+  tt=apply(corr_psd, 1, which.max)
+  temp_boot[i,1]=sum(seq(1:176)==tt)/176
+  tt=apply(corr_psd, 2, which.max)
+  temp_boot[i,2]=sum(seq(1:176)==tt)/176
+  
+}
+
+fingerprint_boot[,1]= as.vector(temp_boot)
+write.csv(fingerprint_boot, 'C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_output/bootstrapped_fingerprinting_adults2.csv')
+
+
+for (j in 1:5){
+  temp_boot=matrix(, ncol = 2,nrow=1000)
+for(i in 1:1000) {
+  index_freq=index_bands[[j]]
+  index_random_par=sample(1:sample_size, 176)
+  
+    corr_psd=cor(t(psd_training_age[index_random_par,index_freq]),t(psd_validation_age[index_random_par,index_freq]))  
+  tt=apply(corr_psd, 1, which.max)
+  temp_boot[i,1]=sum(seq(1:176)==tt)/176
+  tt=apply(corr_psd, 2, which.max)
+  temp_boot[i,2]=sum(seq(1:176)==tt)/176
+  
+}
+  fingerprint_boot[,j+1]= as.vector(temp_boot)
+write.csv(fingerprint_boot, 'C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_output/bootstrapped_fingerprinting_adults2.csv')
+
+print(mean(as.vector(temp_boot), na.rm = TRUE))
+print(sd(as.vector(temp_boot), na.rm = TRUE))
+}
+
+beepr::beep(2)
+
+```
+
+```{r plot fingerprint lifespan effects }
+
+data1=read.csv('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_output/bootstrapped_fingerprinting_fullcohort2.csv')
+
+data1=data1[,-1]
+data4plot= data.frame(mean_differen=apply(data1, 2, mean), lower=apply(data1, 2, quantile, probs=c(0.025,0.975))[1,], upper= apply(data1, 2, quantile, probs=c(0.025,0.975))[2,])
+
+data4plot$band= c("full band", "theta", "alpha", "beta", "gamma", "high gamma")
+data4plot$group= rep('full cohort',6)
+
+data1=read.csv('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_output/bootstrapped_fingerprinting_below122.csv')
+
+data1=data1[,-1]
+
+data4plot2= data.frame(mean_differen=apply(data1, 2, mean), lower=apply(data1, 2, quantile, probs=c(0.025,0.975))[1,], upper= apply(data1, 2, quantile, probs=c(0.025,0.975))[2,])
+
+data4plot2$band= c("full band", "theta", "alpha", "beta", "gamma", "high gamma")
+data4plot2$group= rep('below 12',6)
+
+data4plot= rbind(data4plot, data4plot2)
+
+
+data1=read.csv('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_output/bootstrapped_fingerprinting_teens2.csv')
+
+data1=data1[,-1]
+
+data4plot2= data.frame(mean_differen=apply(data1, 2, mean), lower=apply(data1, 2, quantile, probs=c(0.025,0.975))[1,], upper= apply(data1, 2, quantile, probs=c(0.025,0.975))[2,])
+
+data4plot2$band= c("full band", "theta", "alpha", "beta", "gamma", "high gamma")
+data4plot2$group= rep('12-18 years old',6)
+
+data4plot= rbind(data4plot, data4plot2)
+
+
+data1=read.csv('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_output/bootstrapped_fingerprinting_adults2.csv')
+
+data1=data1[,-1]
+
+data4plot2= data.frame(mean_differen=apply(data1, 2, mean), lower=apply(data1, 2, quantile, probs=c(0.025,0.975))[1,], upper= apply(data1, 2, quantile, probs=c(0.025,0.975))[2,])
+
+data4plot2$band= c("full band", "theta", "alpha", "beta", "gamma", "high gamma")
+data4plot2$group= rep('adults',6)
+
+data4plot= rbind(data4plot, data4plot2)
+
+
+data4plot[,c(1,2,3)]= data4plot[,c(1,2,3)]*100
+
+data4plot$band= factor(data4plot$band, levels = c("full band", "theta", "alpha", "beta", "gamma", "high gamma", "aperiodic"))
+
+data4plot$group= factor(data4plot$group, levels = c("full cohort", "below 12", "12-18 years old", "adults"))
+
+
+ggplot(data=data4plot, aes(x=band, y=mean_differen, fill=group, width=.5)) +  coord_cartesian(ylim=c(0,100))+geom_bar(stat = "identity", position=position_dodge(width = 0.5)) + geom_errorbar(aes(ymin=lower, ymax=upper), width=.2 ,position=position_dodge(.5))  +theme_minimal() + scale_fill_manual(values=cbbPalette) + labs(y="Accuracy (%)", x="",title="") + theme(text = element_text(size=40), legend.title=element_blank()) + ggpubr::theme_classic2()
+
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/differentiation_accuracy_bootstrapped_across_age_groups2.pdf', device = "pdf", width=25, height=4.51, dpi=800)
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/differentiation_accuracy_bootstrapped_across_age_groups2.jpeg', device = "jpeg", width=25, height=4.51, dpi=800)
+
+
+data4plot= data4plot[data4plot$band == 'full band',]
+ggplot(data=data4plot, aes(x=band, y=mean_differen, fill=group, width=.5)) +  coord_cartesian(ylim=c(0,100))+geom_bar(stat = "identity", position=position_dodge(width = 0.5)) + geom_errorbar(aes(ymin=lower, ymax=upper), width=.2 ,position=position_dodge(.5))  +theme_minimal() + scale_fill_manual(values=cbbPalette) + labs(y="Accuracy (%)", x="",title="") + theme(text = element_text(size=40), legend.title=element_blank()) + ggpubr::theme_classic2()
+
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/differentiation_accuracy_bootstrapped_across_age_groups_broadband.pdf', device = "pdf", width=7, height=4.51, dpi=800)
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/differentiation_accuracy_bootstrapped_across_age_groups_broadband.jpeg', device = "jpeg", width=7, height=4.51, dpi=800)
+
+
+```
+
+
+```{r bootstrap aperiodic differentiation accuracy}
+
+
+
+fingerprint_boot=matrix(, ncol = 1,nrow=2000)
+
+temp_boot=matrix(, ncol = 2,nrow=1000)
+
+for(i in 1:1000) {
+  index_random_par=sample(1:401, 361)
+  
+  corr_psd=cor(t(aperPSD_training[index_random_par,]),t(aperPSD_validation[index_random_par,])) 
+  tt=apply(corr_psd, 1, which.max)
+  temp_boot[i,1]=sum(seq(1:361)==tt)/361
+  tt=apply(corr_psd, 2, which.max)
+  temp_boot[i,2]=sum(seq(1:361)==tt)/361
+  
+}
+
+fingerprint_boot[,1]= as.vector(temp_boot)
+write.csv(fingerprint_boot, 'C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_output/bootstrapped_aperiodic_fingerprinting_fullcohort.csv')
+
+mean(as.vector(temp_boot), na.rm = TRUE)
+sd(as.vector(temp_boot), na.rm = TRUE)
+
+beepr::beep(2)
+
+# look @ age groups now 
+# start with below 12
+psd_training_age= aperPSD_training[demo$Group== 'below 12 years old',]
+psd_validation_age= aperPSD_validation[demo$Group== 'below 12 years old',]
+sample_size= dim(psd_validation_age)[1]
+
+fingerprint_boot=matrix(, ncol = 1,nrow=2000)
+
+temp_boot=matrix(, ncol = 2,nrow=1000)
+
+for(i in 1:1000) {
+  index_random_par=sample(1:sample_size, 133)
+  
+  corr_psd=cor(t(psd_training_age[index_random_par,]),t(psd_validation_age[index_random_par,])) 
+  tt=apply(corr_psd, 1, which.max)
+  temp_boot[i,1]=sum(seq(1:133)==tt)/133
+  tt=apply(corr_psd, 2, which.max)
+  temp_boot[i,2]=sum(seq(1:133)==tt)/133
+  
+}
+
+fingerprint_boot[,1]= as.vector(temp_boot)
+write.csv(fingerprint_boot, 'C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_output/bootstrapped_aperiodic_fingerprinting_below12.csv')
+
+beepr::beep(2)
+
+# TEENS 12-18
+psd_training_age= aperPSD_training[demo$Group== '12-18 years old',]
+psd_validation_age= aperPSD_validation[demo$Group== '12-18 years old',]
+sample_size= dim(psd_validation_age)[1]
+
+fingerprint_boot=matrix(, ncol = 1,nrow=2000)
+
+temp_boot=matrix(, ncol = 2,nrow=1000)
+
+for(i in 1:1000) {
+  index_random_par=sample(1:sample_size, 51)
+  
+  corr_psd=cor(t(psd_training_age[index_random_par,]),t(psd_validation_age[index_random_par,])) 
+  tt=apply(corr_psd, 1, which.max)
+  temp_boot[i,1]=sum(seq(1:51)==tt)/51
+  tt=apply(corr_psd, 2, which.max)
+  temp_boot[i,2]=sum(seq(1:51)==tt)/51
+  
+}
+
+fingerprint_boot[,1]= as.vector(temp_boot)
+write.csv(fingerprint_boot, 'C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_output/bootstrapped_aperiodic_fingerprinting_teens.csv')
+
+beepr::beep(2)
+
+
+
+# adults
+psd_training_age= aperPSD_training[demo$Group== '18+ years old',]
+psd_validation_age= aperPSD_validation[demo$Group== '18+ years old',]
+sample_size= dim(psd_validation_age)[1]
+
+fingerprint_boot=matrix(, ncol = 1,nrow=2000)
+
+temp_boot=matrix(, ncol = 2,nrow=1000)
+
+for(i in 1:1000) {
+  index_random_par=sample(1:sample_size, 176)
+  
+  corr_psd=cor(t(psd_training_age[index_random_par,]),t(psd_validation_age[index_random_par,])) 
+  tt=apply(corr_psd, 1, which.max)
+  temp_boot[i,1]=sum(seq(1:176)==tt)/176
+  tt=apply(corr_psd, 2, which.max)
+  temp_boot[i,2]=sum(seq(1:176)==tt)/176
+  
+}
+
+fingerprint_boot[,1]= as.vector(temp_boot)
+write.csv(fingerprint_boot, 'C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_output/bootstrapped_aperiodic_fingerprinting_adults.csv')
+
+
+beepr::beep(2)
+```
+
+
+
+
+```{r plot aperiodic fingerprint lifespan effects }
+
+data1=read.csv('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_output/bootstrapped_aperiodic_fingerprinting_fullcohort.csv')
+
+data1=data1[,2]
+data4plot= data.frame(mean_differen=mean(data1), lower=quantile(data1,  probs=c(0.025,0.975))[1], upper= quantile(data1, probs=c(0.025,0.975))[2])
+
+data4plot$band= c("aperiodic")
+data4plot$group= rep('full cohort',1)
+
+data1=read.csv('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_output/bootstrapped_aperiodic_fingerprinting_below12.csv')
+
+data1=data1[,2]
+data4plot2= data.frame(mean_differen=mean(data1), lower=quantile(data1,  probs=c(0.025,0.975))[1], upper= quantile(data1, probs=c(0.025,0.975))[2])
+
+data4plot2$band= c("aperiodic")
+data4plot2$group= rep('below 12',1)
+
+data4plot= rbind(data4plot, data4plot2)
+
+
+data1=read.csv('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_output/bootstrapped_aperiodic_fingerprinting_teens.csv')
+
+data1=data1[,2]
+data4plot2= data.frame(mean_differen=mean(data1), lower=quantile(data1,  probs=c(0.025,0.975))[1], upper= quantile(data1, probs=c(0.025,0.975))[2])
+
+data4plot2$band= c("aperiodic")
+data4plot2$group= rep('12-18 years old',1)
+
+data4plot= rbind(data4plot, data4plot2)
+
+
+data1=read.csv('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_output/bootstrapped_aperiodic_fingerprinting_adults.csv')
+
+data1=data1[,2]
+data4plot2= data.frame(mean_differen=mean(data1), lower=quantile(data1,  probs=c(0.025,0.975))[1], upper= quantile(data1, probs=c(0.025,0.975))[2])
+
+data4plot2$band= c("aperiodic")
+data4plot2$group= rep('adults',1)
+
+data4plot= rbind(data4plot, data4plot2)
+
+
+data4plot[,c(1,2,3)]= data4plot[,c(1,2,3)]*100
+
+data4plot$band= factor(data4plot$band, levels = c( "aperiodic"))
+
+data4plot$group= factor(data4plot$group, levels = c("full cohort", "below 12", "12-18 years old", "adults"))
+
+
+ggplot(data=data4plot, aes(x=band, y=mean_differen, fill=group, width=.5)) +  coord_cartesian(ylim=c(0,100))+geom_bar(stat = "identity", position=position_dodge(width = 0.5)) + geom_errorbar(aes(ymin=lower, ymax=upper), width=.2 ,position=position_dodge(.5))  +theme_minimal() + scale_fill_manual(values=cbbPalette) + labs(y="Accuracy (%)", x="",title="") + theme(text = element_text(size=40), legend.title=element_blank())+ ggpubr::theme_classic2()
+
+
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/differentiation_accuracy_aperiodic_bootstrapped_across_age_groups.pdf', device = "pdf", width=7, height=4.51, dpi=800)
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/differentiation_accuracy_aperiodic_bootstrapped_across_age_groups.jpeg', device = "jpeg", width=7, height=4.51, dpi=800)
+
+
+
+```
+
+
+```{r bootstrap aperiodic corrected effects}
+
+
+fingerprint_boot=matrix(, ncol = 6,nrow=2000)
+
+temp_boot=matrix(, ncol = 2,nrow=1000)
+
+for(i in 1:1000) {
+  index_random_par=sample(1:401, 361)
+  
+  corr_psd=cor(t(corrPSD_training[index_random_par,]),t(corrPSD_validation[index_random_par,])) 
+  tt=apply(corr_psd, 1, which.max)
+  temp_boot[i,1]=sum(seq(1:361)==tt)/361
+  tt=apply(corr_psd, 2, which.max)
+  temp_boot[i,2]=sum(seq(1:361)==tt)/361
+  
+}
+
+fingerprint_boot[,1]= as.vector(temp_boot)
+write.csv(fingerprint_boot, 'C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_output/bootstrapped_fingerprinting_apericorr_fullcohort2.csv')
+
+mean(as.vector(temp_boot), na.rm = TRUE)
+sd(as.vector(temp_boot), na.rm = TRUE)
+
+
+index_theta=unlist(lapply(1:148, function(x) ((x-1)*93)+(1:8))) # theta
+index_alpha=unlist(lapply(1:148, function(x) ((x-1)*93)+(9:18))) # alpha
+index_beta=unlist(lapply(1:148, function(x) ((x-1)*93)+(19:52))) # beta
+index_gamma=unlist(lapply(1:148, function(x) ((x-1)*93)+(53:93))) # gamma
+
+index_bands=list(index_theta, index_alpha,index_beta,index_gamma)
+
+
+for (j in 1:4){
+  temp_boot=matrix(, ncol = 2,nrow=1000)
+for(i in 1:1000) {
+  index_freq=index_bands[[j]]
+  index_random_par=sample(1:401, 361)
+  
+  corr_psd=cor(t(corrPSD_training[index_random_par,index_freq]),t(corrPSD_validation[index_random_par,index_freq])) 
+  tt=apply(corr_psd, 1, which.max)
+  temp_boot[i,1]=sum(seq(1:361)==tt)/361
+  tt=apply(corr_psd, 2, which.max)
+  temp_boot[i,2]=sum(seq(1:361)==tt)/361
+  
+}
+  fingerprint_boot[,j+1]= as.vector(temp_boot)
+write.csv(fingerprint_boot, 'C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_output/bootstrapped_fingerprinting_apericorr_fullcohort2.csv')
+
+print(mean(as.vector(temp_boot), na.rm = TRUE))
+print(sd(as.vector(temp_boot), na.rm = TRUE))
+}
+
+beepr::beep(2)
+
+# look @ age groups now 
+# start with below 12
+corrPSD_training_age= corrPSD_training[demo$Group== 'below 12 years old',]
+corrPSD_validation_age= corrPSD_validation[demo$Group== 'below 12 years old',]
+sample_size= dim(corrPSD_validation_age)[1]
+
+fingerprint_boot=matrix(, ncol = 6,nrow=2000)
+
+temp_boot=matrix(, ncol = 2,nrow=1000)
+
+for(i in 1:1000) {
+  index_random_par=sample(1:sample_size, 133)
+  
+  corr_psd=cor(t(corrPSD_training_age[index_random_par,]),t(corrPSD_validation_age[index_random_par,])) 
+  tt=apply(corr_psd, 1, which.max)
+  temp_boot[i,1]=sum(seq(1:133)==tt)/133
+  tt=apply(corr_psd, 2, which.max)
+  temp_boot[i,2]=sum(seq(1:133)==tt)/133
+  
+}
+
+fingerprint_boot[,1]= as.vector(temp_boot)
+write.csv(fingerprint_boot, 'C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_output/bootstrapped_fingerprinting_apericorr_below122.csv')
+
+
+for (j in 1:4){
+  temp_boot=matrix(, ncol = 2,nrow=1000)
+for(i in 1:1000) {
+  index_freq=index_bands[[j]]
+  index_random_par=sample(1:sample_size, 133)
+  
+    corr_psd=cor(t(corrPSD_training_age[index_random_par,index_freq]),t(corrPSD_validation_age[index_random_par,index_freq]))  
+  tt=apply(corr_psd, 1, which.max)
+  temp_boot[i,1]=sum(seq(1:133)==tt)/133
+  tt=apply(corr_psd, 2, which.max)
+  temp_boot[i,2]=sum(seq(1:133)==tt)/133
+  
+}
+  fingerprint_boot[,j+1]= as.vector(temp_boot)
+write.csv(fingerprint_boot, 'C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_output/bootstrapped_fingerprinting_apericorr_below122.csv')
+
+print(mean(as.vector(temp_boot), na.rm = TRUE))
+print(sd(as.vector(temp_boot), na.rm = TRUE))
+}
+
+beepr::beep(2)
+
+# TEENS 12-18
+corrPSD_training_age= corrPSD_training[demo$Group== '12-18 years old',]
+corrPSD_validation_age= corrPSD_validation[demo$Group== '12-18 years old',]
+sample_size= dim(corrPSD_validation_age)[1]
+
+fingerprint_boot=matrix(, ncol = 6,nrow=2000)
+
+temp_boot=matrix(, ncol = 2,nrow=1000)
+
+for(i in 1:1000) {
+  index_random_par=sample(1:sample_size, 51)
+  
+  corr_psd=cor(t(corrPSD_training_age[index_random_par,]),t(corrPSD_validation_age[index_random_par,])) 
+  tt=apply(corr_psd, 1, which.max)
+  temp_boot[i,1]=sum(seq(1:51)==tt)/51
+  tt=apply(corr_psd, 2, which.max)
+  temp_boot[i,2]=sum(seq(1:51)==tt)/51
+  
+}
+
+fingerprint_boot[,1]= as.vector(temp_boot)
+write.csv(fingerprint_boot, 'C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_output/bootstrapped_fingerprinting_apericorr_teens2.csv')
+
+
+for (j in 1:4){
+  temp_boot=matrix(, ncol = 2,nrow=1000)
+for(i in 1:1000) {
+  index_freq=index_bands[[j]]
+  index_random_par=sample(1:sample_size, 51)
+  
+    corr_psd=cor(t(corrPSD_training_age[index_random_par,index_freq]),t(corrPSD_validation_age[index_random_par,index_freq]))  
+  tt=apply(corr_psd, 1, which.max)
+  temp_boot[i,1]=sum(seq(1:51)==tt)/51
+  tt=apply(corr_psd, 2, which.max)
+  temp_boot[i,2]=sum(seq(1:51)==tt)/51
+  
+}
+  fingerprint_boot[,j+1]= as.vector(temp_boot)
+write.csv(fingerprint_boot, 'C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_output/bootstrapped_fingerprinting_apericorr_teens2.csv')
+
+print(mean(as.vector(temp_boot), na.rm = TRUE))
+print(sd(as.vector(temp_boot), na.rm = TRUE))
+}
+
+beepr::beep(2)
+
+
+
+# adults
+corrPSD_training_age= corrPSD_training[demo$Group== '18+ years old',]
+corrPSD_validation_age= corrPSD_validation[demo$Group== '18+ years old',]
+sample_size= dim(corrPSD_validation_age)[1]
+
+fingerprint_boot=matrix(, ncol = 6,nrow=2000)
+
+temp_boot=matrix(, ncol = 2,nrow=1000)
+
+for(i in 1:1000) {
+  index_random_par=sample(1:sample_size, 176)
+  
+  corr_psd=cor(t(corrPSD_training_age[index_random_par,]),t(corrPSD_validation_age[index_random_par,])) 
+  tt=apply(corr_psd, 1, which.max)
+  temp_boot[i,1]=sum(seq(1:176)==tt)/176
+  tt=apply(corr_psd, 2, which.max)
+  temp_boot[i,2]=sum(seq(1:176)==tt)/176
+  
+}
+
+fingerprint_boot[,1]= as.vector(temp_boot)
+write.csv(fingerprint_boot, 'C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_output/bootstrapped_fingerprinting_apericorr_adults2.csv')
+
+
+for (j in 1:4){
+  temp_boot=matrix(, ncol = 2,nrow=1000)
+for(i in 1:1000) {
+  index_freq=index_bands[[j]]
+  index_random_par=sample(1:sample_size, 176)
+  
+    corr_psd=cor(t(corrPSD_training_age[index_random_par,index_freq]),t(corrPSD_validation_age[index_random_par,index_freq]))  
+  tt=apply(corr_psd, 1, which.max)
+  temp_boot[i,1]=sum(seq(1:176)==tt)/176
+  tt=apply(corr_psd, 2, which.max)
+  temp_boot[i,2]=sum(seq(1:176)==tt)/176
+  
+}
+  fingerprint_boot[,j+1]= as.vector(temp_boot)
+write.csv(fingerprint_boot, 'C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_output/bootstrapped_fingerprinting_apericorr_adults2.csv')
+
+print(mean(as.vector(temp_boot), na.rm = TRUE))
+print(sd(as.vector(temp_boot), na.rm = TRUE))
+}
+
+beepr::beep(2)
+
+```
+
+```{r plot aperiodic corrected lifespan effects }
+
+data1=read.csv('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_output/bootstrapped_fingerprinting_apericorr_fullcohort2.csv')
+
+data1=data1[,-1]
+data1=data1[,1:5]
+data4plot= data.frame(mean_differen=apply(data1, 2, mean), lower=apply(data1, 2, quantile, probs=c(0.025,0.975))[1,], upper= apply(data1, 2, quantile, probs=c(0.025,0.975))[2,])
+
+data4plot$band= c("full band", "theta", "alpha", "beta", "gamma")
+data4plot$group= rep('full cohort',5)
+
+data1=read.csv('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_output/bootstrapped_fingerprinting_apericorr_below122.csv')
+
+data1=data1[,-1]
+data1=data1[,1:5]
+data4plot2= data.frame(mean_differen=apply(data1, 2, mean), lower=apply(data1, 2, quantile, probs=c(0.025,0.975))[1,], upper= apply(data1, 2, quantile, probs=c(0.025,0.975))[2,])
+
+data4plot2$band= c("full band", "theta", "alpha", "beta", "gamma")
+data4plot2$group= rep('below 12',5)
+
+data4plot= rbind(data4plot, data4plot2)
+
+
+data1=read.csv('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_output/bootstrapped_fingerprinting_apericorr_teens2.csv')
+
+data1=data1[,-1]
+data1=data1[,1:5]
+data4plot2= data.frame(mean_differen=apply(data1, 2, mean), lower=apply(data1, 2, quantile, probs=c(0.025,0.975))[1,], upper= apply(data1, 2, quantile, probs=c(0.025,0.975))[2,])
+
+data4plot2$band= c("full band", "theta", "alpha", "beta", "gamma")
+data4plot2$group= rep('12-18 years old',5)
+
+data4plot= rbind(data4plot, data4plot2)
+
+
+data1=read.csv('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_output/bootstrapped_fingerprinting_apericorr_adults2.csv')
+
+data1=data1[,-1]
+data1=data1[,1:5]
+data4plot2= data.frame(mean_differen=apply(data1, 2, mean), lower=apply(data1, 2, quantile, probs=c(0.025,0.975))[1,], upper= apply(data1, 2, quantile, probs=c(0.025,0.975))[2,])
+
+data4plot2$band= c("full band", "theta", "alpha", "beta", "gamma")
+data4plot2$group= rep('adults',5)
+
+data4plot= rbind(data4plot, data4plot2)
+
+
+data4plot[,c(1,2,3)]= data4plot[,c(1,2,3)]*100
+
+data4plot$band= factor(data4plot$band, levels = c("full band", "theta", "alpha", "beta", "gamma"))
+
+data4plot$group= factor(data4plot$group, levels = c("full cohort", "below 12", "12-18 years old", "adults"))
+
+
+ggplot(data=data4plot, aes(x=band, y=mean_differen, fill=group, width=.5)) +  coord_cartesian(ylim=c(0,100))+geom_bar(stat = "identity", position=position_dodge(width = 0.5)) + geom_errorbar(aes(ymin=lower, ymax=upper), width=.2 ,position=position_dodge(.5))  +theme_minimal() + scale_fill_manual(values=cbbPalette) + labs(y="Accuracy (%)", x="",title="") + theme(text = element_text(size=40), legend.title=element_blank()) + ggpubr::theme_classic2()
+
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/differentiation_accuracy_apericorr_bootstrapped_across_age_groups2.pdf', device = "pdf", width=25, height=4.51, dpi=800)
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/differentiation_accuracy_apericorr_bootstrapped_across_age_groups2.jpeg', device = "jpeg", width=25, height=4.51, dpi=800)
+
+
+data4plot= data4plot[data4plot$band == 'full band',]
+ggplot(data=data4plot, aes(x=band, y=mean_differen, fill=group, width=.5)) +  coord_cartesian(ylim=c(0,100))+geom_bar(stat = "identity", position=position_dodge(width = 0.5)) + geom_errorbar(aes(ymin=lower, ymax=upper), width=.2 ,position=position_dodge(.5))  +theme_minimal() + scale_fill_manual(values=cbbPalette) + labs(y="Accuracy (%)", x="",title="") + theme(text = element_text(size=40), legend.title=element_blank()) + ggpubr::theme_classic2()
+
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/differentiation_accuracy_apericorr_bootstrapped_across_age_groups_broadband.pdf', device = "pdf", width=7, height=4.51, dpi=800)
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/differentiation_accuracy_apericorr_bootstrapped_across_age_groups_broadband.jpeg', device = "jpeg", width=7, height=4.51, dpi=800)
+
+
+```
+
+
+```{r self similarity aperiodic }
+
+corr_psd=cor(t(aperPSD_training),t(aperPSD_validation)) 
+demo$psd_self_corr=diag(corr_psd)
+demo$psd_identifiability=diag(apply(corr_psd, 2, scale))
+
+print("psd fingerprinting:")
+tt=apply(corr_psd, 1, which.max)
+sum(seq(1:401)==tt)/401
+tt=apply(corr_psd, 2, which.max)
+sum(seq(1:401)==tt)/401
+
+ggplot(demo, aes(psd_self_corr, color= Group, fill=group, alpha=0.5)) +
+  geom_density(aes( color= Group, fill=Group), alpha= 0.5) +
+  ggpubr::theme_classic2() +
+  labs(x = "self-similarity", y = "denstity")  + xlim(c(0.85,1)) +
+  ggtitle("") + scale_fill_manual(values=cbbPalette[c(1:3)]) + scale_color_manual(values=cbbPalette[c(1:3)]) 
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/self_corr_aperiodic_per_age_group_hist_xlimits.pdf', device = "pdf")
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/self_corr_aperiodic_per_age_group_hist_xlimits.jpeg', device = "jpeg")
+
+
+
+RVAideMemoire::perm.t.test(demo$psd_self_corr[demo$Group == "below 12 years old"],demo$psd_self_corr[demo$Group == "18+ years old"], nperm=1000)
+
+demo$psd_self_corr_trans= DescTools::FisherZ(demo$psd_self_corr)
+cor_test_autocorr=cor.test(demo$Age, demo$psd_self_corr_trans)
+bf_corr = correlationBF(demo$Age, demo$psd_self_corr_trans, whichModels = "top")
+summary(bf_corr)
+
+
+cor_test_diff=cor.test(demo$Age, demo$psd_identifiability)
+bf_diff = correlationBF(demo$Age, demo$psd_identifiability, whichModels = "top")
+summary(bf_diff)
+
+ggplot(demo, aes(x=Age , y = psd_identifiability, fill=cbbPalette[2])) + 
+  geom_jitter(colour = cbbPalette[2]) + 
+  stat_smooth(method = "lm", colour = 'black',fullrange = T, fill = cbbPalette[2]) +
+  labs(title = paste("R = ", signif(cor_test_diff$estimate, 2),
+                     "t =", signif(cor_test_diff$statistic,2 ),
+                     " bf =", signif(1/exp(bf_diff@bayesFactor$bf), 2),
+                     " P =", signif(cor_test_diff$p.value, 2) )) + scale_fill_manual(values=cbbPalette)  +
+  ggpubr::theme_classic2() +   ylab("differentiability") + xlab("Age")+
+  theme(axis.text=element_text(size=12),
+        axis.title=element_text(size=14,face="bold"), legend.position = "none") 
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/Scatter_aperiodic_AGE_differentiability.pdf', device = "pdf", width = 5, height = 5)
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/Scatter_aperiodic_AGE_differentiability.jpeg', device = "jpeg", width = 5, height = 5)
+
+
+
+lm0=lm(psd_identifiability ~ 1, demo)
+lm1=lm(psd_identifiability ~ Age, demo)
+lm2=lm(psd_identifiability ~ Age + Sex, demo)
+lm3=lm(psd_identifiability ~ Age * Sex, demo)
+
+anova(lm0,lm1,lm2,lm3)
+
+sjPlot::tab_model(lm2)
+
+
+
+```
+
+
+
+```{r cross_correlations aperiodic}
+
+inds=order(demo$Age)
+ages_or=demo$Age[inds]
+groups_or= demo$Group[inds]
+
+
+corr_psd=cor(t(aperPSD_training[inds,]),t(aperPSD_validation[inds, ])) 
+
+data4plot=cbind(stack(as.data.frame(corr_psd)), rep(1:401, each=401), rep(1:401, 401))
+
+colnames(data4plot)[3:4]= c('Y', 'X')
+
+data4plot$values[data4plot$values < 0.75] =0.75
+
+ggplot(data4plot, aes(X, Y, fill= values)) + 
+  geom_tile() + scale_y_reverse()+  theme_void() + colorspace::scale_fill_continuous_sequential(palette= 'Plasma', rev= FALSE, limits= c(0.75, 1)) + geom_hline(yintercept = 148) + geom_vline(xintercept = 148)
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/APERIODIC_Corr_matrix_all_people.pdf', device = "pdf", width = 5, height = 5)
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/APERIODIC_Corr_matrix_all_people.jpeg', device = "jpeg", width = 5, height = 5)
+
+
+data4plot=cbind(stack(as.data.frame(corr_psd)), rep(ages_or, each=401), rep(ages_or, 401), rep(groups_or, 401), rep(cut(ages_or, breaks=c(0, 10, 15,20,25,30,35,40,70)),each=401))
+colnames(data4plot)[c(3,4,5,6)]= c('age1', 'age2', 'Group', 'agebin')
+
+plottt=data4plot %>% group_by(Group, agebin) %>% summarise(mean_corr= mean(values, na.rm=TRUE), CI_upp= mean(values, na.rm=TRUE)+ (sd(values, na.rm=TRUE)/sqrt(n())), CI_low= mean(values, na.rm=TRUE)- (sd(values, na.rm=TRUE)/sqrt(n())) )
+
+ggplot(plottt, aes(x=agebin, y = mean_corr, color= Group, fill=Group, group= Group)) + geom_line() +
+  geom_point(size=4) +
+  geom_ribbon(aes(,x=agebin, y = mean_corr, fill=Group, ymin = CI_low, ymax = CI_upp), alpha = .5) + xlab('age') + ylab('other similairty') + scale_fill_manual(values=cbbPalette[c(1:3)]) + scale_color_manual(values=cbbPalette[c(1:3)])  + coord_cartesian(ylim = c(0.7, 1)) + scale_x_discrete(limits = rev(levels(plottt$agebin))) + ggpubr::theme_classic2() + theme(legend.position = 'none')
+
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/APERIODIC_smoothed_crosscorrelation_across-age.pdf', device = "pdf", width = 5, height = 5)
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/APERIODIC_smoothed_crosscorrelation_across-age.jpeg', device = "jpeg", width = 5, height = 5)
+
+# now plot the same thing for self corr
+
+
+data4plot=data.frame(values=diag(corr_psd), ages1=ages_or,Group=groups_or, agebin=cut(ages_or, breaks=c(0, 10, 15,20,25,30,35,40,70)))
+
+plottt=data4plot %>% group_by(agebin) %>% summarise(mean_corr= mean(values, na.rm=TRUE), CI_upp= mean(values, na.rm=TRUE)+ (sd(values, na.rm=TRUE)/sqrt(n())), CI_low= mean(values, na.rm=TRUE)- (sd(values, na.rm=TRUE)/sqrt(n())))
+
+ggplot(plottt, aes(x=agebin, y = mean_corr, group='self-similarity')) + geom_line(linetype='longdash', colour= 'grey') + geom_ribbon(aes(,x=agebin, y = mean_corr, ymin = CI_low, ymax = CI_upp), alpha = .5)+ xlab('age') + ylab('other similairty')  +coord_cartesian(ylim = c(0.7, 1)) + scale_x_discrete(limits = rev(levels(plottt$agebin)))+ ggpubr::theme_classic2()
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/APERIODIC_smoothed_seelf_similairt_across-age.pdf', device = "pdf", width = 5, height = 5)
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/APERIODIC_smoothed_seelf_similairty_across-age.jpeg', device = "jpeg", width = 5, height = 5)
+
+
+
+inds=demo$Age <12
+
+corr_psd=cor(t(aperPSD_training[inds,]),t(aperPSD_validation[inds, ])) 
+
+data4plot=cbind(stack(as.data.frame(corr_psd)), rep(1:148, each=148), rep(1:148, 148))
+
+colnames(data4plot)[3:4]= c('Y', 'X')
+
+data4plot$values[data4plot$values < 0.75] =0.75
+
+ggplot(data4plot, aes(X, Y, fill= values)) + 
+  geom_tile() + scale_y_reverse()+  theme_void() + colorspace::scale_fill_continuous_sequential(palette= 'Plasma', rev= FALSE, limits= c(0.75, 1))
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/Corr_matrix_aperiodic_kids_below12.pdf', device = "pdf", width = 5, height = 5)
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/Corr_matrix_aperiodic_kids_below12.jpeg', device = "jpeg", width = 5, height = 5)
+
+
+diag(corr_psd)= NaN
+
+children_cross= stack(as.data.frame(corr_psd))
+
+inds=demo$Age <18 & demo$Age >=12
+
+corr_psd=cor(t(aperPSD_training[inds,]),t(aperPSD_validation[inds, ])) 
+
+data4plot=cbind(stack(as.data.frame(corr_psd)), rep(1:57, each=57), rep(1:57, 57))
+
+colnames(data4plot)[3:4]= c('Y', 'X')
+
+data4plot$values[data4plot$values < 0.75] =0.75
+
+ggplot(data4plot, aes(X, Y, fill= values)) + 
+  geom_tile() + scale_y_reverse()+  theme_void() + colorspace::scale_fill_continuous_sequential(palette= 'Plasma', rev= FALSE, limits= c(0.75, 1))
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/Corr_matrix_aperiodic_kids_teens.pdf', device = "pdf", width = 5, height = 5)
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/Corr_matrix_aperiodic_kids_teens.jpeg', device = "jpeg", width = 5, height = 5)
+
+diag(corr_psd)= NaN
+
+teens_cross= stack(as.data.frame(corr_psd))
+
+inds=demo$Age >=18
+
+corr_psd=cor(t(aperPSD_training[inds,]),t(aperPSD_validation[inds, ])) 
+
+data4plot=cbind(stack(as.data.frame(corr_psd)), rep(1:196, each=196), rep(1:196, 196))
+
+colnames(data4plot)[3:4]= c('Y', 'X')
+
+data4plot$values[data4plot$values < 0.75] =0.75
+
+ggplot(data4plot, aes(X, Y, fill= values)) + 
+  geom_tile() + scale_y_reverse()+  theme_void() + colorspace::scale_fill_continuous_sequential(palette= 'Plasma', rev= FALSE, limits= c(0.75, 1))
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/Corr_matrix_aperiodic_kids_adults.pdf', device = "pdf", width = 5, height = 5)
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/Corr_matrix_aperiodic_kids_adults.jpeg', device = "jpeg", width = 5, height = 5)
+
+diag(corr_psd)= NaN
+
+adult_cross= stack(as.data.frame(corr_psd))
+
+# plot cross cors
+
+
+data4plot_corss= data.frame(values= c(children_cross[,1], teens_cross[,1],adult_cross[,1]), Group= c(rep('below 12', dim(children_cross)[1]), rep('12-18 years old', dim(teens_cross)[1]), rep('adults', dim(adult_cross)[1])))
+
+
+
+ggplot(data4plot_corss, aes(values, color= Group, fill=group, alpha=0.5)) +
+  geom_density(aes( color= Group, fill=Group), alpha= 0.5) +
+  ggpubr::theme_classic2() +
+  labs(x = "other-similarity", y = "denstity")  + xlim(c(0.5,1)) +
+  ggtitle("") + scale_fill_manual(values=cbbPalette[c(1:3)]) + scale_color_manual(values=cbbPalette[c(1:3)]) 
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/cross_corr_aperiodic_per_age_group_hist.pdf', device = "pdf")
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/cross_corr_aperiodic_per_age_group_hist.jpeg', device = "jpeg")
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+```{r self similarity rhythmic }
+
+corr_psd=cor(t(corrPSD_training),t(corrPSD_validation)) 
+demo$psd_self_corr=diag(corr_psd)
+demo$psd_identifiability=diag(apply(corr_psd, 2, scale))
+
+print("psd fingerprinting:")
+tt=apply(corr_psd, 1, which.max)
+sum(seq(1:401)==tt)/401
+tt=apply(corr_psd, 2, which.max)
+sum(seq(1:401)==tt)/401
+
+ggplot(demo, aes(psd_self_corr, color= Group, fill=group, alpha=0.5)) +
+  geom_density(aes( color= Group, fill=Group), alpha= 0.5) +
+  ggpubr::theme_classic2() +
+  labs(x = "self-similarity", y = "denstity")  + xlim(c(0.6,1)) +
+  ggtitle("") + scale_fill_manual(values=cbbPalette[c(1:3)]) + scale_color_manual(values=cbbPalette[c(1:3)]) 
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/self_corr_corrspec_per_age_group_hist_xlimits.pdf', device = "pdf")
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/self_corr_corrspec_per_age_group_hist_xlimits.jpeg', device = "jpeg")
+
+
+
+#RVAideMemoire::perm.t.test(demo$psd_self_corr[demo$Group == "below 12 years old"],demo$psd_self_corr[demo$Group == "18+ years old"], nperm=1000)
+
+demo$psd_self_corr_trans= DescTools::FisherZ(demo$psd_self_corr)
+cor_test_autocorr=cor.test(demo$Age, demo$psd_self_corr_trans)
+bf_corr = correlationBF(demo$Age, demo$psd_self_corr_trans, whichModels = "top")
+summary(bf_corr)
+
+
+cor_test_diff=cor.test(demo$Age, demo$psd_identifiability)
+bf_diff = correlationBF(demo$Age, demo$psd_identifiability, whichModels = "top")
+summary(bf_diff)
+
+ggplot(demo, aes(x=Age , y = psd_identifiability, fill=cbbPalette[2])) + 
+  geom_jitter(colour = cbbPalette[2]) + 
+  stat_smooth(method = "lm", colour = 'black',fullrange = T, fill = cbbPalette[2]) +
+  labs(title = paste("R = ", signif(cor_test_diff$estimate, 2),
+                     "t =", signif(cor_test_diff$statistic,2 ),
+                     " bf =", signif(1/exp(bf_diff@bayesFactor$bf), 2),
+                     " P =", signif(cor_test_diff$p.value, 2) )) + scale_fill_manual(values=cbbPalette)  +
+  ggpubr::theme_classic2() +   ylab("differentiability") + xlab("Age")+
+  theme(axis.text=element_text(size=12),
+        axis.title=element_text(size=14,face="bold"), legend.position = "none") 
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/Scatter_corrspec_AGE_differentiability.pdf', device = "pdf", width = 5, height = 5)
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/Scatter_corrspec_AGE_differentiability.jpeg', device = "jpeg", width = 5, height = 5)
+
+
+
+lm0=lm(psd_identifiability ~ 1, demo)
+lm1=lm(psd_identifiability ~ Age, demo)
+lm2=lm(psd_identifiability ~ Age + Sex, demo)
+lm3=lm(psd_identifiability ~ Age * Sex, demo)
+
+anova(lm0,lm1,lm2,lm3)
+
+sjPlot::tab_model(lm2)
+
+
+
+```
+
+
+
+
+```{r cross_correlations rhythmic}
+
+inds=order(demo$Age)
+ages_or=demo$Age[inds]
+groups_or= demo$Group[inds]
+
+
+corr_psd=cor(t(corrPSD_training[inds,]),t(corrPSD_validation[inds, ])) 
+
+data4plot=cbind(stack(as.data.frame(corr_psd)), rep(1:401, each=401), rep(1:401, 401))
+
+colnames(data4plot)[3:4]= c('Y', 'X')
+
+data4plot$values[data4plot$values < 0.75] =0.75
+
+ggplot(data4plot, aes(X, Y, fill= values)) + 
+  geom_tile() + scale_y_reverse()+  theme_void() + colorspace::scale_fill_continuous_sequential(palette= 'Plasma', rev= FALSE, limits= c(0.75, 1)) + geom_hline(yintercept = 148) + geom_vline(xintercept = 148)
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/RYTHMIC_Corr_matrix_all_people.pdf', device = "pdf", width = 5, height = 5)
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/RYTHMIC_Corr_matrix_all_people.jpeg', device = "jpeg", width = 5, height = 5)
+
+
+data4plot=cbind(stack(as.data.frame(corr_psd)), rep(ages_or, each=401), rep(ages_or, 401), rep(groups_or, 401), rep(cut(ages_or, breaks=c(0, 10, 15,20,25,30,35,40,70)),each=401))
+colnames(data4plot)[c(3,4,5,6)]= c('age1', 'age2', 'Group', 'agebin')
+
+plottt=data4plot %>% group_by(Group, agebin) %>% summarise(mean_corr= mean(values, na.rm=TRUE), CI_upp= mean(values, na.rm=TRUE)+ (sd(values, na.rm=TRUE)/sqrt(n())), CI_low= mean(values, na.rm=TRUE)- (sd(values, na.rm=TRUE)/sqrt(n())) )
+
+ggplot(plottt, aes(x=agebin, y = mean_corr, color= Group, fill=Group, group= Group)) + geom_line() +
+  geom_point(size=4) +
+  geom_ribbon(aes(,x=agebin, y = mean_corr, fill=Group, ymin = CI_low, ymax = CI_upp), alpha = .5) + xlab('age') + ylab('other similairty') + scale_fill_manual(values=cbbPalette[c(1:3)]) + scale_color_manual(values=cbbPalette[c(1:3)])  + coord_cartesian(ylim = c(0.4, 1)) + scale_x_discrete(limits = rev(levels(plottt$agebin))) + ggpubr::theme_classic2() + theme(legend.position = 'none')
+
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/RYTHMIC_smoothed_crosscorrelation_across-age.pdf', device = "pdf")
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/RYTHMIC_smoothed_crosscorrelation_across-age.jpeg', device = "jpeg")
+
+# now plot the same thing for self corr
+
+
+data4plot=data.frame(values=diag(corr_psd), ages1=ages_or,Group=groups_or, agebin=cut(ages_or, breaks=c(0, 10, 15,20,25,30,35,40,70)))
+
+plottt=data4plot %>% group_by(agebin) %>% summarise(mean_corr= mean(values, na.rm=TRUE), CI_upp= mean(values, na.rm=TRUE)+ (sd(values, na.rm=TRUE)/sqrt(n())), CI_low= mean(values, na.rm=TRUE)- (sd(values, na.rm=TRUE)/sqrt(n())))
+
+ggplot(plottt, aes(x=agebin, y = mean_corr, group='self-similarity')) + geom_line(linetype='longdash', colour= 'grey') + geom_ribbon(aes(,x=agebin, y = mean_corr, ymin = CI_low, ymax = CI_upp), alpha = .5)+ xlab('age') + ylab('other similairty')  +coord_cartesian(ylim = c(0.4, 1)) + scale_x_discrete(limits = rev(levels(plottt$agebin)))+ ggpubr::theme_classic2()
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/RYTHMIC_smoothed_seelf_similairt_across-age.pdf', device = "pdf")
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/RYTHMIC_smoothed_seelf_similairty_across-age.jpeg', device = "jpeg")
+
+
+
+data4plot=cbind(stack(as.data.frame(corr_psd)), rep(1:401, each=401), rep(1:401, 401))
+
+colnames(data4plot)[3:4]= c('Y', 'X')
+
+data4plot$values[data4plot$values < 0.75] =0.75
+
+ggplot(data4plot, aes(X, Y, fill= values)) + 
+  geom_tile() + scale_y_reverse()+  theme_void() + colorspace::scale_fill_continuous_sequential(palette= 'Plasma', rev= FALSE, limits= c(0.75, 1))
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/Corr_matrix_corrspec_all_people.pdf', device = "pdf", width = 5, height = 5)
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/Corr_matrix_corrspec_all_people.jpeg', device = "jpeg", width = 5, height = 5)
+
+
+inds=demo$Age <12
+
+corr_psd=cor(t(corrPSD_training[inds,]),t(corrPSD_validation[inds, ])) 
+
+data4plot=cbind(stack(as.data.frame(corr_psd)), rep(1:148, each=148), rep(1:148, 148))
+
+colnames(data4plot)[3:4]= c('Y', 'X')
+
+data4plot$values[data4plot$values < 0.75] =0.75
+
+ggplot(data4plot, aes(X, Y, fill= values)) + 
+  geom_tile() + scale_y_reverse()+  theme_void() + colorspace::scale_fill_continuous_sequential(palette= 'Plasma', rev= FALSE, limits= c(0.75, 1))
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/Corr_matrix_corrspec_kids_below12.pdf', device = "pdf", width = 5, height = 5)
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/Corr_matrix_corrspec_kids_below12.jpeg', device = "jpeg", width = 5, height = 5)
+
+
+diag(corr_psd)= NaN
+
+children_cross= stack(as.data.frame(corr_psd))
+
+inds=demo$Age <18 & demo$Age >=12
+
+corr_psd=cor(t(corrPSD_training[inds,]),t(corrPSD_validation[inds, ])) 
+
+data4plot=cbind(stack(as.data.frame(corr_psd)), rep(1:57, each=57), rep(1:57, 57))
+
+colnames(data4plot)[3:4]= c('Y', 'X')
+
+data4plot$values[data4plot$values < 0.75] =0.75
+
+ggplot(data4plot, aes(X, Y, fill= values)) + 
+  geom_tile() + scale_y_reverse()+  theme_void() + colorspace::scale_fill_continuous_sequential(palette= 'Plasma', rev= FALSE, limits= c(0.75, 1))
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/Corr_matrix_corrspec_kids_teens.pdf', device = "pdf", width = 5, height = 5)
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/Corr_matrix_corrspec_kids_teens.jpeg', device = "jpeg", width = 5, height = 5)
+
+diag(corr_psd)= NaN
+
+teens_cross= stack(as.data.frame(corr_psd))
+
+inds=demo$Age >=18
+
+corr_psd=cor(t(corrPSD_training[inds,]),t(corrPSD_validation[inds, ])) 
+
+data4plot=cbind(stack(as.data.frame(corr_psd)), rep(1:196, each=196), rep(1:196, 196))
+
+colnames(data4plot)[3:4]= c('Y', 'X')
+
+data4plot$values[data4plot$values < 0.75] =0.75
+
+ggplot(data4plot, aes(X, Y, fill= values)) + 
+  geom_tile() + scale_y_reverse()+  theme_void() + colorspace::scale_fill_continuous_sequential(palette= 'Plasma', rev= FALSE, limits= c(0.75, 1))
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/Corr_matrix_corrspec_kids_adults.pdf', device = "pdf", width = 5, height = 5)
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/Corr_matrix_corrspec_kids_adults.jpeg', device = "jpeg", width = 5, height = 5)
+
+diag(corr_psd)= NaN
+
+adult_cross= stack(as.data.frame(corr_psd))
+
+# plot cross cors
+
+
+data4plot_corss= data.frame(values= c(children_cross[,1], teens_cross[,1],adult_cross[,1]), Group= c(rep('below 12', dim(children_cross)[1]), rep('12-18 years old', dim(teens_cross)[1]), rep('adults', dim(adult_cross)[1])))
+
+
+
+ggplot(data4plot_corss, aes(values, color= Group, fill=group, alpha=0.5)) +
+  geom_density(aes( color= Group, fill=Group), alpha= 0.5) +
+  ggpubr::theme_classic2() +
+  labs(x = "other-similarity", y = "denstity")  + xlim(c(0.3,1)) +
+  ggtitle("") + scale_fill_manual(values=cbbPalette[c(1:3)]) + scale_color_manual(values=cbbPalette[c(1:3)]) 
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/cross_corr_corrspec_per_age_group_hist.pdf', device = "pdf")
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/cross_corr_corrspec_per_age_group_hist.jpeg', device = "jpeg")
+
+```
+
+
+```{r fingerprinting of empty room}
+
+
+cbbPalette= c("#4f89e0", "#f54c6c","#76D224", '#e4e000', '#4d1f90')
+
+
+#ge_colors = c("#000000","#007E7E","#8001FC","#FF8207","#FFFFFF")
+#scale_fill_gradientn(colors = ge_colors,oob = scales::squish,limits=c(floor(rng[1]), ceiling(rng[2])))
+setwd('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/')
+
+demo= read.csv('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/demo_clean_no_duplicates.csv')
+demo= demo[order(demo$UniqueID),]
+demo= demo[1:403,]
+
+psd_training = read.csv('./outputs/BIC_PSD_training.csv', header = FALSE)
+psd_validation = psd_training[seq(2,802,2),]
+psd_training= psd_training[seq(1,802,2),]
+
+
+emptyroom = read.csv('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting//outputs/EMPTY_PSD_training.csv', header = FALSE)
+
+subj_Id_psd= read.csv('./outputs/subject_brainstorm_ids.csv', header = TRUE)
+
+# note remove this when all subjets have been processed and accounted for
+demo=demo[c(1:29, 31:240, 242:404),]
+index=order(subj_Id_psd$subjID)
+subj_psd_order=subj_Id_psd$subjID[index]
+
+paste('sub-',demo$UniqueID, sep = '') == subj_Id_psd$subjID[index]
+sum(paste('sub-',demo$UniqueID, sep = '') == subj_Id_psd$subjID[index])
+
+
+psd_training= psd_training[index,]
+psd_validation= psd_validation[index,]
+
+emptyroom= emptyroom[index,]
+
+demo=demo[1:401,]
+demo$Group= 'below 12 years old'
+demo$Group[demo$Age >=12 & demo$Age <18]= '12-18 years old'
+demo$Group[demo$Age >=18]= '18+ years old'
+
+
+fingerprint=matrix(, ncol = 5,nrow=4)
+
+corr_emptyroom1=cor(t(psd_training),t(emptyroom)) 
+
+print("emptyroom fingerprinting accuracy:")
+tt=apply(corr_emptyroom1, 1, which.max)
+fingerprint[1,1]=sum(seq(1:401)==tt)/401
+tt=apply(corr_emptyroom1, 2, which.max)
+fingerprint[1,2]=sum(seq(1:401)==tt)/401
+
+
+corr_emptyroom2=cor(t(psd_validation),t(emptyroom)) 
+
+print("emptyroom fingerprinting accuracy:")
+tt=apply(corr_emptyroom2, 1, which.max)
+fingerprint[1,3]=sum(seq(1:401)==tt)/401
+tt=apply(corr_emptyroom2, 2, which.max)
+fingerprint[1,4]=sum(seq(1:401)==tt)/401
+
+# break up into three (roughly equal) age groups
+# young adults (18-45)
+
+ind=demo$Age>12
+sum(ind==TRUE)
+corr_psd=cor(t(psd_training[ind,]),t(emptyroom[ind,])) 
+print("psd fingerprinting young adults:")
+tt=apply(corr_psd, 1, which.max)
+fingerprint[2,1]=sum(seq(1:sum(ind==TRUE))==tt)/sum(ind==TRUE)
+tt=apply(corr_psd, 2, which.max)
+fingerprint[2,2]=sum(seq(1:sum(ind==TRUE))==tt)/sum(ind==TRUE)
+
+corr_psd=cor(t(psd_validation[ind,]),t(emptyroom[ind,])) 
+print("psd fingerprinting young adults:")
+tt=apply(corr_psd, 1, which.max)
+fingerprint[2,3]=sum(seq(1:sum(ind==TRUE))==tt)/sum(ind==TRUE)
+tt=apply(corr_psd, 2, which.max)
+fingerprint[2,4]=sum(seq(1:sum(ind==TRUE))==tt)/sum(ind==TRUE)
+
+
+# adults (45-65)
+
+ind=demo$Age >=12 & demo$Age <18
+sum(ind==TRUE)
+corr_psd=cor(t(psd_training[ind,]),t(emptyroom[ind,])) 
+print("psd fingerprinting adults:")
+tt=apply(corr_psd, 1, which.max)
+fingerprint[3,1]=sum(seq(1:sum(ind==TRUE))==tt)/sum(ind==TRUE)
+tt=apply(corr_psd, 2, which.max)
+fingerprint[3,2]=sum(seq(1:sum(ind==TRUE))==tt)/sum(ind==TRUE)
+
+corr_psd=cor(t(psd_validation[ind,]),t(emptyroom[ind,])) 
+print("psd fingerprinting adults:")
+tt=apply(corr_psd, 1, which.max)
+fingerprint[3,3]=sum(seq(1:sum(ind==TRUE))==tt)/sum(ind==TRUE)
+tt=apply(corr_psd, 2, which.max)
+fingerprint[3,4]=sum(seq(1:sum(ind==TRUE))==tt)/sum(ind==TRUE)
+
+
+# older adults (45-65)
+ind=demo$Age<=18
+sum(ind==TRUE)
+corr_psd=cor(t(psd_training[ind,]),t(emptyroom[ind,])) 
+print("psd fingerprinting older adults:")
+tt=apply(corr_psd, 1, which.max)
+fingerprint[4,1]=sum(seq(1:sum(ind==TRUE))==tt)/sum(ind==TRUE)
+tt=apply(corr_psd, 2, which.max)
+fingerprint[4,2]=sum(seq(1:sum(ind==TRUE))==tt)/sum(ind==TRUE)
+
+corr_psd=cor(t(psd_validation[ind,]),t(emptyroom[ind,])) 
+print("psd fingerprinting older adults:")
+tt=apply(corr_psd, 1, which.max)
+fingerprint[4,3]=sum(seq(1:sum(ind==TRUE))==tt)/sum(ind==TRUE)
+tt=apply(corr_psd, 2, which.max)
+fingerprint[4,4]=sum(seq(1:sum(ind==TRUE))==tt)/sum(ind==TRUE)
+
+fingerprint=as.data.frame(fingerprint)
+
+fingerprint[,5]=c("full dataset", "below 12", "12-18", "18+ adults adults")
+fingerprint[,6]=c("full band", "full band", "full band", "full band")
+
+colnames(fingerprint) = c("acc1", "acc2","acc1", "acc2", "age_group", "band")
+
+data4plot=cbind(stack(fingerprint[,1:4]),fingerprint[,5:6])
+data4plot$values=as.numeric(data4plot$values)*100
+
+data4plot$age_group = ordered(fingerprint$age_group, levels= c("full dataset", "below 12", "12-18", "18+ adults adults"))
+
+data4plot$band = ordered(fingerprint$band, levels= c("full band"))
+
+ggplot(data=data4plot, aes(x=band, y=values, fill=age_group, width=.5)) +  coord_cartesian(ylim=c(0,100))+geom_bar(stat = "identity", position=position_dodge(width = 0.5)) +theme_minimal() + scale_fill_manual(values=cbbPalette) + labs(y="Accuracy (%)", x="",title="") + theme(text = element_text(size=40), legend.title=element_blank())
+
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/EMPTYROOM_FINGERPRINT.pdf', device = "pdf")
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figuresEMPTYROOM_FINGERPRINT.jpeg', device = "jpeg")
+
+
+index_theta=unlist(lapply(1:148, function(x) ((x-1)*293)+(1:8))) # theta
+index_alpha=unlist(lapply(1:148, function(x) ((x-1)*293)+(9:18))) # alpha
+index_beta=unlist(lapply(1:148, function(x) ((x-1)*293)+(19:52))) # beta
+index_gamma=unlist(lapply(1:148, function(x) ((x-1)*293)+(53:92))) # gamma
+index_hgamma=unlist(lapply(1:148, function(x) ((x-1)*293)+(93:293))) # Hgamma
+
+index_bands=list(index_theta, index_alpha,index_beta,index_gamma,index_hgamma)
+
+index_age= list(demo$Age >0, demo$Age <12, ind=demo$Age >=12 & demo$Age <18, ind=demo$Age >= 18)
+
+
+count=5
+for(j in 1:5){
+    index_freq=index_bands[[j]]
+    
+  for(k in 1:4){
+    ind=index_age[[k]]
+    
+    corr_psd=cor(t(psd_training[ind,index_freq]),t(emptyroom[ind,index_freq])) 
+    tt=apply(corr_psd, 1, which.max)
+    fingerprint[count,1]=sum(seq(1:sum(ind==TRUE))==tt)/sum(ind==TRUE)
+    tt=apply(corr_psd, 2, which.max)
+    fingerprint[count,2]=sum(seq(1:sum(ind==TRUE))==tt)/sum(ind==TRUE)
+    
+    corr_psd=cor(t(psd_validation[ind,index_freq]),t(emptyroom[ind,index_freq])) 
+    tt=apply(corr_psd, 1, which.max)
+    fingerprint[count,3]=sum(seq(1:sum(ind==TRUE))==tt)/sum(ind==TRUE)
+    tt=apply(corr_psd, 2, which.max)
+    fingerprint[count,4]=sum(seq(1:sum(ind==TRUE))==tt)/sum(ind==TRUE)
+
+    count=count+1
+  
+  }
+
+}
+
+
+
+
+fingerprint[,5]=rep(c("full dataset", "below 12", "12-18", "18+ adults adults"),6)
+fingerprint[,6]=rep(c("full band", "theta", "alpha", "beta", "gamma", "high gamma"), each=4)
+
+colnames(fingerprint) = c("acc1", "acc2","acc1", "acc2", "age_group", "band")
+
+data4plot=cbind(stack(fingerprint[,1:4]),fingerprint[,5:6])
+data4plot$values=as.numeric(data4plot$values)*100
+
+data4plot$age_group = ordered(fingerprint$age_group, levels= c("full dataset", "below 12", "12-18", "18+ adults adults"))
+
+data4plot$band = ordered(fingerprint$band, levels= c("full band", "theta", "alpha", "beta", "gamma", "high gamma"))
+
+ggplot(data=data4plot, aes(x=band, y=values, fill=age_group, width=.5)) +  coord_cartesian(ylim=c(0,100))+geom_bar(stat = "identity", position=position_dodge(width = 0.5)) +theme_minimal() + scale_fill_manual(values=cbbPalette) + labs(y="Accuracy (%)", x="",title="") + theme(text = element_text(size=40), legend.title=element_blank())
+
+
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/differentiation_accuracy_bootstrapped_across_age_groups2.pdf', device = "pdf", width=25, height=4.51, dpi=800)
+
+ggsave('C:/Users/J Da Silva Castanhei/Documents/SickKidz_fingerprinting/R_figures/differentiation_accuracy_bootstrapped_across_age_groups2.jpeg', device = "jpeg", width=25, height=4.51, dpi=800)
+
+
+corr_psd=cor(t(psd_training[,index_hgamma]),t(emptyroom[,index_hgamma])) 
+diag(corr_psd)
+mean(diag(corr_psd))
+mean(corr_psd)
+sd(corr_psd)
+# try permutations of people 
+
+corr_psd=cor(t(psd_training[,index_hgamma]),t(psd_validation[,index_hgamma])) 
+diag(corr_psd)
+mean(diag(corr_psd))
+mean(corr_psd)
+sd(corr_psd)
+
+
+```
+
+
+
+
+
+
