@@ -23,8 +23,4 @@ An explanation of the gene expression data obtained from [AHBA](https://human.br
 
 This work on [bioRxiv](https://www.biorxiv.org/content/10.1101/2024.11.27.624077v1.abstract). Please cite da Silva Castanheira et al., 2024. If you have any questions please contact the authors of the paper.
 
-## Manuscript and Citation
-
-This work is on [bioRxiv](https://www.biorxiv.org/content/10.1101/2024.07.19.604292v1). Please cite da Silva Castanheira et al., 2024. If you have any questions, please contact the authors of the paper.
-
 
