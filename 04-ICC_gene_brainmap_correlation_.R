@@ -82,7 +82,7 @@ age_mean= array(, c(1,37))
 
 atlas=read.csv('/Users/jason/Desktop/Destrieux_neuromaps/Neuromaps_destrieux_full_atlas.csv')
 
-
+# loop through age windows
 for (i in 1:37){
   
   #start= 25*(i-1) # sliding window of 50 people with 50% overlap
@@ -161,7 +161,7 @@ pos_gene_expression= rowMeans(gene_expression[,which(colnames(gene_expression) %
 
 neg_gene_expression= rowMeans(gene_expression[,which(colnames(gene_expression) %in% gene_names$neg_genes)])
 
-
+# look at alignment to the graident of neg and pos genes across all age windows
 tt=apply(temp[,index$V1], 1, cor.test, neg_gene_expression)
 neg=unlist(tt)
 
@@ -227,27 +227,13 @@ ggsave('~/Documents/CAMCAN_outputs/figures/HundredPpl_Aperiodiccorr_genecorr_con
 
 
 # plot effects
-
 data4plotNEG= data4plot[data4plot$gene== 'negative',]
 data4plotNEG$valueZ= DescTools::FisherZ(data4plotNEG$value)
 
-#fit simple linear regression model
-fit <- lm(valueZ ~ group, data=data4plotNEG)
-
-#fit piecewise regression model to original model, estimating a breakpoint at x=9
-segmented.fit <- segmented::segmented(fit, seg.Z = ~group, npsi=2)
-
-pred.quad = predict(segmented.fit)
-
-AIC(segmented.fit)
-BIC(segmented.fit)
-
+# fit polynomial model
 lm3=lm(DescTools::FisherZ(value) ~poly(group, 3), data4plotNEG)
 sjPlot::tab_model(lm3)
 
-AIC(lm3)
-BIC(lm3)
-# ploy 3rd is better than piecewise
 
 ggplot(data4plotNEG, aes(x=group, y=valueZ, group=gene, color = gene, fill=gene)) + geom_point(size=5) + 
   geom_line(data=data4plotNEG, 
@@ -265,14 +251,9 @@ ggsave('~/Documents/CAMCAN_outputs/figures/HundredPpl_Aperiodiccorr_genecorr_con
 data4plotPOS= data4plot[data4plot$gene== 'positive',]
 data4plotPOS$valueZ= DescTools::FisherZ(data4plotPOS$value)
 
-
+# fit polynomial model
 lm3=lm(DescTools::FisherZ(value) ~poly(group, 3), data4plotPOS)
 sjPlot::tab_model(lm3)
-
-AIC(lm3)
-BIC(lm3)
-# ploy 3rd is better than piecewise
-
 
 ggplot(data4plotPOS, aes(x=group, y=valueZ, group=gene, color = gene, fill=gene)) + geom_point(size=5) + 
   geom_line(data=data4plotPOS, 

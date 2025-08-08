@@ -129,10 +129,9 @@ for (i in 1:37){
 
 }
 
-
+# look at alignmnent to FC acorss all age bins
 tt=apply(temp, 1, cor.test, atlas$fcgradient01)
 neg=unlist(tt)
-
 
 
 # plot effects
@@ -155,7 +154,7 @@ ggplot(data4plot, aes(x=group, y=value, color= 'fill', fill='fill')) + geom_poin
 ggsave('~/Documents/CAMCAN_outputs/figures/HundredPpl_Aperiodiccorr_FCGRAD01_continuous_mergedCohorts_POLY3rd.pdf', device = "pdf", width= 10, height =5)
 
 
-
+# run non linear 3rd order model
 lm0=lm(DescTools::FisherZ(value) ~1, data4plot)
 lm1=lm(DescTools::FisherZ(value) ~poly(group, 1), data4plot)
 lm2=lm(DescTools::FisherZ(value) ~poly(group, 2), data4plot)
@@ -165,6 +164,7 @@ anova(lm0,lm1,lm2, lm3)
 summary(lm3)
 sjPlot::tab_model(lm3)
 
+# spatial autocorrelation permutation tests
 permuted_index= read.csv('~/Documents/SickKids/abagen_analysis/csv_data4MATLAB/permuted_indexes_of_destriuex_atlas_SPINs&Twirl.csv')
 permuted_index= permuted_index[,-1]
 permuted_index=permuted_index+1
